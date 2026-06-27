@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Vector store index (rebuilt on startup)
+faiss_index/
+
+# Data files (add your own)
+data/*.csv
+!data/data.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

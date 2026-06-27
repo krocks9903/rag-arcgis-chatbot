@@ -1,0 +1,9 @@
+id,location_name,latitude,longitude,category,description,value
+1,Downtown Park,28.0587,-82.4139,park,"Large green space with walking trails and playground",High
+2,Main Street Corridor,28.0612,-82.4098,commercial,"Primary commercial district with retail and restaurants",High
+3,Riverside District,28.0543,-82.4201,residential,"Residential neighborhood along the river",Medium
+4,Tech Hub Plaza,28.0634,-82.4056,office,"Modern office complex with co-working spaces",High
+5,Community Center,28.0571,-82.4178,civic,"Multi-purpose community facility and event space",Medium
+6,Historic Quarter,28.0598,-82.4125,historic,"Preserved historic buildings from early 1900s",Medium
+7,North Greenway,28.0667,-82.4089,park,"Linear park connecting neighborhoods",Low
+8,South Market,28.0521,-82.4143,commercial,"Farmers market and specialty shops",Medium
