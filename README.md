@@ -1,152 +1,113 @@
-# RAG Chatbot + ArcGIS Map
+# RAG ArcGIS Chatbot
 
-A **fully free** RAG (Retrieval-Augmented Generation) chatbot that answers questions from your CSV data, displayed alongside an ArcGIS interactive map.
+This app combines a FastAPI backend with a simple frontend so you can ask questions about your CSV data and view the results alongside an ArcGIS map.
 
-## 🏗️ Architecture (100% Free)
+## What you need
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Frontend (plain HTML)                                  │
-│  ┌─────────────────────┐  ┌──────────────────────────┐ │
-│  │   Chat Panel        │  │   ArcGIS Map Panel       │ │
-│  │   (left)            │  │   (right, ArcGIS JS API) │ │
-│  └─────────────────────┘  └──────────────────────────┘ │
-└────────────────────┬────────────────────────────────────┘
-                     │ REST
-┌────────────────────▼────────────────────────────────────┐
-│  Backend (FastAPI)                                      │
-│                                                         │
-│  CSV → LangChain CSVLoader                             │
-│      → RecursiveCharacterTextSplitter                  │
-│      → HuggingFace Embeddings (local, free)            │
-│      → FAISS Vector Store (local, free)                │
-│      → HuggingFace Hub LLM (free inference tier)       │
-│      → RetrievalQA Chain                               │
-└─────────────────────────────────────────────────────────┘
-```
+- Python 3.10 or 3.11
+- A Groq API key for the LLM backend
+- Optional: an ArcGIS API key if you want to replace the default map layer
 
-**Free components:**
-| Component | Tool | Cost |
-|---|---|---|
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` | Free (local) |
-| Vector Store | FAISS | Free (local) |
-| LLM | Mistral-7B via HuggingFace Hub | Free tier |
-| Map | ArcGIS JS API 4.x | Free (developer account) |
-| Framework | LangChain | Open source |
+## Quick start
 
----
+### 1. Clone the repo
 
-## 🚀 Quick Start
-
-### 1. Clone & set up
 ```bash
-git clone https://github.com/YOUR_USERNAME/rag-arcgis-chatbot.git
+git clone https://github.com/krocks9903/rag-arcgis-chatbot.git
 cd rag-arcgis-chatbot
 ```
 
-### 2. Backend setup
+### 2. Create and activate a virtual environment
+
+On macOS/Linux:
+
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows PowerShell:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3. Install dependencies
+
+```bash
 pip install -r requirements.txt
-
-# Set up your free API token
-cp .env.example .env
-# Edit .env and add your HuggingFace token
-# Get one free at: https://huggingface.co/settings/tokens
 ```
 
-### 3. Add your CSV
+This installs FastAPI, Uvicorn, LangChain, FAISS, sentence-transformers, and the Groq/Hugging Face integrations needed by the app.
+
+### 4. Create your environment file
+
 ```bash
-# Put your CSV in the /data folder (or use the sample)
-cp your_data.csv ../data/data.csv
+copy .env.example .env
 ```
 
-### 4. Run the backend
+Then edit the new file and add your Groq key:
+
+```env
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+You can also leave the ArcGIS key blank unless you want to swap in your own map layer.
+
+### 5. Add or use your data
+
+The app looks for a CSV at:
+
+```text
+backend/data/data.csv
+```
+
+You can either:
+
+- replace that file with your own CSV, or
+- upload a CSV through the app UI if the endpoint is available
+
+### 6. Run the backend
+
 ```bash
-cd backend
 uvicorn app:app --reload --port 8000
-# → API docs at http://localhost:8000/docs
 ```
 
-### 5. Open the frontend
+Once it starts, open:
+
+- API docs: http://localhost:8000/docs
+- Frontend: open frontend/index.html in your browser, or serve the folder with a simple server
+
+### 7. Open the frontend
+
+From the repo root:
+
 ```bash
-# Just open in your browser — no build step needed
-open ../frontend/index.html
-# Or serve it:
-cd ../frontend && python -m http.server 3000
+cd frontend
+python -m http.server 3000
 ```
 
----
+Then open http://localhost:3000 in your browser.
 
-## 🗺️ Connecting your ArcGIS Map
+## Project structure
 
-1. Create a free developer account at [developers.arcgis.com](https://developers.arcgis.com)
-2. Get your API key from the dashboard
-3. In `frontend/index.html`, find the `TODO` comment and replace with your Feature Layer URL:
-
-```javascript
-const layer = new FeatureLayer({
-  url: "https://services.arcgis.com/YOUR_ORG/FeatureServer/0"
-});
-map.add(layer);
-```
-
-4. Update the map center coordinates to your area:
-```javascript
-center: [-82.4139, 28.0587],  // [longitude, latitude]
-zoom: 13,
-```
-
----
-
-## 📂 Project Structure
-
-```
+```text
 rag-arcgis-chatbot/
 ├── backend/
-│   ├── app.py              # FastAPI + LangChain RAG pipeline
-│   ├── requirements.txt    # Python dependencies
-│   └── .env.example        # Environment variable template
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── data/
 ├── frontend/
-│   └── index.html          # Split-panel UI (chat + ArcGIS map)
-├── data/
-│   └── data.csv            # Your data goes here
+│   └── index.html
 └── README.md
 ```
 
----
+## Notes
 
-## 🔌 API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Check backend status |
-| `POST` | `/load` | Load a CSV into the vector store |
-| `POST` | `/chat` | Ask a question, get an answer + sources |
-
-**Example chat request:**
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Which locations are in the commercial category?"}'
-```
-
----
-
-## 🔄 Swapping the LLM (optional upgrades)
-
-The backend is designed to swap LLMs easily. To use a different free option:
-
-**Option A: Ollama (fully local, no API key)**
-```python
-from langchain_community.llms import Ollama
-llm = Ollama(model="mistral")  # after running: ollama pull mistral
-```
-
-**Option B: Groq (free tier, very fast)**
-```python
-from langchain_groq import ChatGroq
-llm = ChatGroq(model="llama3-8b-8192", groq_api_key=os.getenv("GROQ_API_KEY"))
-```
+- The app uses a local FAISS index and local embeddings, so it can run without a hosted vector database.
+- The first run may take a little longer while the embedding model downloads.
+- If you want to use a different map layer, update the ArcGIS configuration in the frontend HTML.

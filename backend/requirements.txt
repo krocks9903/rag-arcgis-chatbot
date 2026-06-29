@@ -10,10 +10,14 @@ langchain-community==0.2.5
 sentence-transformers==3.0.0
 
 # Free local vector store
-faiss-cpu==1.8.0
+faiss-cpu==1.14.3
 
 # HuggingFace Hub (free tier LLM inference)
 huggingface-hub==0.23.4
 
+# Groq and HuggingFace integrations for the RAG app
+langchain-groq>=0.1.0
+langchain-huggingface>=0.0.2
+
 # CSV loader dependency
-pandas==2.2.2
+pandas>=2.2.3
