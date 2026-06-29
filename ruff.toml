@@ -1,0 +1,7 @@
+# Ruff configuration for QA in CI.
+# E402 is ignored because backend/app.py intentionally calls load_dotenv()
+# before importing modules that read environment variables at import time.
+target-version = "py311"
+
+[lint]
+ignore = ["E402"]
