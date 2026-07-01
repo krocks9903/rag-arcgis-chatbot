@@ -96,14 +96,35 @@ Then open http://localhost:3000 in your browser.
 
 ```text
 rag-arcgis-chatbot/
+├── .github/workflows/
+│   ├── ci.yml              # lint + pytest on push/PR
+│   └── deploy.yml          # Cloud Run deploy (opt-in)
 ├── backend/
 │   ├── app.py
 │   ├── requirements.txt
+│   ├── Dockerfile          # bakes FAISS index + embedding model at build time
 │   ├── .env.example
-│   └── data/
+│   ├── data/
+│   │   └── data.csv
+│   └── tests/
 ├── frontend/
-│   └── index.html
+│   ├── index.html
+│   ├── styles.css
+│   ├── app.js
+│   └── assets/
 └── README.md
+```
+
+## Production frontend
+
+The frontend reads the API from `API_BASE` in `app.js`:
+
+- **Local dev** (frontend on port 3000, backend on 8000): defaults to `http://localhost:8000`
+- **Same-origin deploy**: defaults to `window.location.origin`
+- **Split hosting** (e.g. GitHub Pages + Cloud Run): uncomment and set in `index.html`:
+
+```html
+<script>window.API_BASE = "https://your-service-abc.run.app";</script>
 ```
 
 ## Notes
