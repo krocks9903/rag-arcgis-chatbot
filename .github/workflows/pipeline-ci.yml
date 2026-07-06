@@ -12,12 +12,11 @@ name: Pipeline CI
 # Deliberately NOT triggered by pdfs/** — uploading a PDF is handled by
 # pipeline-refresh.yml, which rebuilds and commits the outputs itself.
 #
-# Known caveat (unlike the legacy silver guard, this build is not fully
-# offline): the Lee County resolver makes live API calls on cache misses, and
-# for a few condo parcels the API returns tied candidate units in arbitrary
-# order, which can flip a unit-number label between runs. If the guard fails
-# with a tiny diff (1-3 rows, identical coordinates, different unit number),
-# re-run the job or rebuild locally and commit.
+# The committed data/ is canonical to the CI environment (ubuntu tesseract):
+# pipeline-refresh.yml rebuilds and bot-commits on the runners, and this guard
+# re-verifies on the same environment. A rebuild on a different OS can show
+# cosmetic OCR diffs (dash rendering, truncation boundaries) — reconcile by
+# dispatching pipeline-refresh rather than committing locally-built CSVs.
 #
 # The `pipeline` branch is listed for fork testing; drop it once this merges
 # upstream.
