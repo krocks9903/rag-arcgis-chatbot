@@ -69,7 +69,10 @@ rag-arcgis-chatbot/
 │   ├── structured_path.py
 │   ├── keyword_path.py
 │   ├── rag_path.py      # CRAG + Groq
-│   ├── orchestrator.py
+│   ├── data/            # data.csv (chatbot corpus) + pipeline medallion tiers
+│   │   ├── bronze/      # hand-curated inputs (geocode overrides, URL lookup)
+│   │   ├── silver/      # relational tables (core/, v2/) + QA triage (review/)
+│   │   └── gold/        # meetings_ai_public.csv + arcgis/ map exports
 │   └── tests/golden_qa.json
 ├── frontend/
 ├── pipeline/               # EagleGIS PDF-extraction pipeline (see pipeline/README.md)
@@ -79,10 +82,6 @@ rag-arcgis-chatbot/
 │   ├── eaglegis/           # extractors, classifiers, location resolver
 │   └── tests/
 ├── pdfs/                   # source meeting-minute PDFs + legacy Estero_Meetings_Final.csv
-├── data/                   # pipeline deliverables, medallion tiers
-│   ├── bronze/             # hand-curated inputs (geocode overrides, URL lookup)
-│   ├── silver/             # relational tables (core/, v2/) + QA triage (review/)
-│   └── gold/               # meetings_ai_public.csv + arcgis/ map exports
 └── scripts/eval_ragas.py
 ```
 
@@ -90,14 +89,14 @@ rag-arcgis-chatbot/
 
 The `pipeline/` directory contains the EagleGIS extraction pipeline that
 produces the Estero meeting data in this repo. It parses meeting-minute
-PDFs from `pdfs/` into the medallion CSVs under `data/`, resolving each
+PDFs from `pdfs/` into the medallion CSVs under `backend/data/`, resolving each
 agenda item to a verified (lat, lon) via Lee County parcel data, and
-exports `data/gold/meetings_ai_public.csv` — the corpus the chatbot
+exports `backend/data/gold/meetings_ai_public.csv` — the corpus the chatbot
 backend consumes.
 
 ```bash
 pip install -r pipeline/requirements.txt
-python pipeline/build.py --pdf-dir pdfs --source-csv pdfs/Estero_Meetings_Final.csv --out-dir data
+python pipeline/build.py --pdf-dir pdfs --source-csv pdfs/Estero_Meetings_Final.csv --out-dir backend/data
 python pipeline/verify.py          # Lee County parcel cross-check
 python -m pytest pipeline/tests -q
 ```
@@ -111,7 +110,7 @@ internals, deliverable schemas, and the review workflow.
 - **sync-data.yml** pulls `meetings_ai_public.csv` from EagleGIS every Monday.
 - **RAGAS eval** (`workflow_dispatch` + `GROQ_API_KEY`): `python scripts/eval_ragas.py`
 - **Pipeline workflows** (`pipeline-ci`, `pipeline-refresh`, `pipeline-drift-watch`)
-  test the extraction pipeline, rebuild `data/` on new PDFs, and re-verify
+  test the extraction pipeline, rebuild `backend/data/` on new PDFs, and re-verify
   committed coordinates against live Lee County parcels.
 
 ## Production frontend

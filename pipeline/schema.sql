@@ -3,7 +3,7 @@
 --
 -- Replaces both the legacy Supabase tier (projects/meetings/documents/
 -- locations) and the v2 bolt-on (meetings_v2/agenda_items/locations_v2/
--- documents_v2/agenda_embeddings). Mirrors data/silver/core/ 1:1 so
+-- documents_v2/agenda_embeddings). Mirrors backend/data/silver/core/ 1:1 so
 -- publishing is a dumb upsert.
 --
 -- Conventions:
@@ -19,7 +19,7 @@
 --   All inserts as: INSERT ... ON CONFLICT (pk) DO UPDATE.
 --
 -- Stays OUT of the serving DB on purpose:
---   * data/silver/review/* (pipeline QA artifacts, incl. the
+--   * backend/data/silver/review/* (pipeline QA artifacts, incl. the
 --     hand-curated geocoded_locations.csv input)
 --   * meetings raw_text (full PDF text bloats the DB; rag_chunks carries
 --     what retrieval needs, pdf_url points at the source PDF)
@@ -247,7 +247,7 @@ create index rag_chunks_filter_idx on public.rag_chunks (category_id, meeting_da
 -- ProjectName-vs-ProjectTitle distinction, ArcGIS_Date, ProposedBy/
 -- SecondedBy from the first motion, and the constant RecordType).
 --
--- The pipeline still writes data/gold/arcgis/layers/*.csv as before —
+-- The pipeline still writes backend/data/gold/arcgis/layers/*.csv as before —
 -- this view replaces the 8 files only on the DATABASE side. Each ArcGIS
 -- layer is: select * from v_map_items where category_id = N, and the same
 -- per-category CSV exports can be regenerated from it at any time.

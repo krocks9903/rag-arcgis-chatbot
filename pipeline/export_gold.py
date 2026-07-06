@@ -40,7 +40,7 @@ def load_tables(silver_dir: Path) -> dict[str, list[dict]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", default="data")
+    parser.add_argument("--data-dir", default="backend/data")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)

@@ -2,7 +2,7 @@ name: Pipeline Drift Watch
 
 # Adapted from the legacy EagleGIS repo's drift-watch.yml. Read-only:
 # re-verifies the committed map deliverable
-# (data/gold/arcgis/arcgis_agenda_map_data.csv) against LIVE Lee County
+# (backend/data/gold/arcgis/arcgis_agenda_map_data.csv) against LIVE Lee County
 # parcel data and fails on any MISMATCH. Catches:
 #
 #   - Upstream reparceling / address changes at Lee County that silently
@@ -47,7 +47,7 @@ jobs:
         run: |
           python - <<'EOF'
           import csv, sys
-          path = "data/silver/review/location_verification.csv"
+          path = "backend/data/silver/review/location_verification.csv"
           with open(path, encoding="utf-8") as fh:
               rows = list(csv.DictReader(fh))
           bad = [r for r in rows if r["Status"] == "MISMATCH"]
@@ -62,6 +62,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: drift-verification-${{ github.run_id }}
-          path: data/silver/review/location_verification.csv
+          path: backend/data/silver/review/location_verification.csv
           retention-days: 30
           if-no-files-found: warn

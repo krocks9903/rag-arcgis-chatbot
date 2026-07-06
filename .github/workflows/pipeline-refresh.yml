@@ -14,9 +14,9 @@ name: Refresh pipeline deliverables
 # Differences from legacy: refresh-data.yml also scraped estero-fl.gov for
 # new minutes and published silver to Supabase. This pipeline has no scraper
 # module and no Supabase — new PDFs arrive by committing them into pdfs/
-# (plus a matching line in data/bronze/estero_minutes_urls.txt), and the serving
+# (plus a matching line in backend/data/bronze/estero_minutes_urls.txt), and the serving
 # copy (the ArcGIS webmap) is still imported manually from
-# data/gold/arcgis/layers/.
+# backend/data/gold/arcgis/layers/.
 #
 # The verify gate runs BEFORE the commit: if the rebuilt map data has any
 # MISMATCH rows against Lee County parcels, nothing is committed.
@@ -29,8 +29,8 @@ on:
     branches: [main, pipeline]
     paths:
       - "pdfs/**"
-      - "data/bronze/geocoded_locations.csv"
-      - "data/bronze/estero_minutes_urls.txt"
+      - "backend/data/bronze/geocoded_locations.csv"
+      - "backend/data/bronze/estero_minutes_urls.txt"
       - ".github/workflows/pipeline-refresh.yml"
   schedule:
     - cron: "0 7 * * 1"
@@ -80,7 +80,7 @@ jobs:
           python pipeline/build.py
           --pdf-dir pdfs
           --source-csv pdfs/Estero_Meetings_Final.csv
-          --out-dir data
+          --out-dir backend/data
 
       - name: Verify against Lee County parcels
         run: python pipeline/verify.py
@@ -89,7 +89,7 @@ jobs:
         run: |
           python - <<'EOF'
           import csv, sys
-          path = "data/silver/review/location_verification.csv"
+          path = "backend/data/silver/review/location_verification.csv"
           with open(path, encoding="utf-8") as fh:
               rows = list(csv.DictReader(fh))
           bad = [r for r in rows if r["Status"] == "MISMATCH"]
@@ -103,7 +103,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add backend/data/
           if git diff --staged --quiet; then
             echo "No deliverable changes to commit."
           else
@@ -118,6 +118,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: location-verification-${{ github.run_id }}
-          path: data/silver/review/location_verification.csv
+          path: backend/data/silver/review/location_verification.csv
           retention-days: 90
           if-no-files-found: warn

@@ -11,7 +11,7 @@ the row is MISMATCH (or ADJACENT if the parcels are within ~80 m of each
 other). If the point isn't in any parcel, or the address can't be found in the
 parcel layer, those become separate triage buckets.
 
-Output: data/silver/review/location_verification.csv (one row per input row).
+Output: backend/data/silver/review/location_verification.csv (one row per input row).
 """
 from __future__ import annotations
 
@@ -335,12 +335,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default="data/gold/arcgis/arcgis_agenda_map_data.csv",
+        default="backend/data/gold/arcgis/arcgis_agenda_map_data.csv",
         type=Path,
     )
     parser.add_argument(
         "--output",
-        default="data/silver/review/location_verification.csv",
+        default="backend/data/silver/review/location_verification.csv",
         type=Path,
     )
     parser.add_argument("--cache-dir", default=Path(".cache/leepa"), type=Path)

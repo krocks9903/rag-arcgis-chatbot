@@ -5,3 +5,7 @@ __pycache__/
 faiss_index/
 tests/
 .git/
+# Pipeline medallion tiers — the image only needs data/data.csv
+data/bronze/
+data/silver/
+data/gold/

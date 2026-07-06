@@ -105,7 +105,7 @@ def main() -> None:
     if not assets:
         raise SystemExit("No PDFs found. Provide --pdf-dir or --git-ref.")
 
-    estero_url_lookup = _load_estero_url_lookup(Path(__file__).parent.parent / "data")
+    estero_url_lookup = _load_estero_url_lookup(Path(__file__).parent.parent / "backend" / "data")
 
     builder = NormalizedBuilder(source_rows=source_rows)
     asset_filenames = {asset.filename.lower() for asset in assets}
@@ -156,7 +156,7 @@ def parse_args() -> argparse.Namespace:
         default="pdfs/Estero_Meetings_Final.csv",
         help="Path to legacy CSV inside --source-git-ref.",
     )
-    parser.add_argument("--out-dir", default="data", help="Output directory.")
+    parser.add_argument("--out-dir", default="backend/data", help="Output directory.")
     parser.add_argument(
         "--max-pages",
         type=int,
@@ -1153,7 +1153,6 @@ class NormalizedBuilder:
             "motion_id", "item_id", "motion_text", "proposed_by", "seconded_by",
             "outcome", "vote_yes", "vote_no", "vote_abstain", "created_at",
         ])
-        arcgis_rows = self._build_legacy_arcgis_rows()
         agenda_arcgis_rows, missing_coordinate_rows = self._build_agenda_arcgis_rows()
         arcgis_fields = [
             "ProjectName", "LayerCategory", "CategoryID", "Board", "MeetingFormat", "MeetingType", "MeetingDate",
@@ -1164,7 +1163,6 @@ class NormalizedBuilder:
             "Longitude", "GeocodeConfidence", "StaffCode", "Filename", "Document_Link",
             "RecordType", "LocationSeq", "IsPrimary", "ParcelID",
         ]
-        write_csv(arcgis_dir / "arcgis_map_data.csv", arcgis_rows, arcgis_fields)
         write_csv(arcgis_dir / "arcgis_agenda_map_data.csv", agenda_arcgis_rows, arcgis_fields)
         self._write_category_csvs(layers_dir, agenda_arcgis_rows, arcgis_fields)
         write_csv(arcgis_dir / "arcgis_missing_coordinates.csv", missing_coordinate_rows, [
@@ -1218,60 +1216,6 @@ class NormalizedBuilder:
             filename = re.sub(r"[^a-z0-9]+", "_", category.lower()).strip("_") + ".csv"
             write_csv(layers_dir / filename, rows, fields)
 
-    def _build_legacy_arcgis_rows(self) -> list[dict]:
-        rows: list[dict] = []
-        for row in self.source_rows:
-            lat = row.get("Latitude")
-            lon = row.get("Longitude")
-            if not lat or not lon:
-                continue
-            meeting_type = normalize_meeting_type(row.get("MeetingType")) or row.get("MeetingType")
-            action_type = infer_action_type(row.get("ActionTaken") or "", meeting_type or "")
-            layer_category = infer_category(
-                " ".join(str(row.get(key) or "") for key in ["ProjectName", "ActionTaken", "MeetingType"]),
-                action_type,
-            )
-            rows.append({
-                "ProjectName": row.get("ProjectName"),
-                "LayerCategory": layer_category,
-                "CategoryID": self._category_ids.get(layer_category),
-                "Board": "Planning Zoning & Design Board" if "Planning" in str(meeting_type) else "Village Council",
-                "MeetingFormat": format_name_for(meeting_type or ""),
-                "MeetingType": meeting_type,
-                "MeetingDate": row.get("MeetingDate"),
-                "ArcGIS_Date": row.get("MeetingDate") or row.get("DocDate"),
-                "MeetingYear": row.get("MeetingYear"),
-                "Status": row.get("Status"),
-                "AgendaItemID": None,
-                "AgendaItemNumber": None,
-                "AgendaItemType": None,
-                "ProjectTitle": row.get("Title"),
-                "Summary": row.get("ActionTaken"),
-                "ActionTaken": row.get("ActionTaken"),
-                "Outcome": row.get("ActionTaken"),
-                "MotionText": None,
-                "ProposedBy": None,
-                "SecondedBy": None,
-                "VoteResult": None,
-                "ApplicantName": None,
-                "ApplicationID": None,
-                "District": None,
-                "LocationName": row.get("LocationName"),
-                "Location": row.get("LocationName"),
-                "Latitude": lat,
-                "Longitude": lon,
-                "GeocodeConfidence": 1.0,
-                "StaffCode": row.get("StaffCode"),
-                "Filename": filename_from_url(row.get("MinutesURL") or ""),
-                "Document_Link": row.get("MinutesURL"),
-                "RecordType": "MeetingLocation",
-                "LocationSeq": 1,
-                "IsPrimary": "true",
-                "ParcelID": None,
-            })
-        return sorted(rows, key=arcgis_sort_key)
-
-    def _build_agenda_arcgis_rows(self) -> tuple[list[dict], list[dict]]:
         meetings = {str(row["meeting_id"]): row for row in self.meetings}
         boards = {str(row["board_id"]): row for row in self.boards}
         formats = {str(row["format_id"]): row for row in self.meeting_formats}

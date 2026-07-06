@@ -26,14 +26,14 @@ on:
     branches: [main, pipeline]
     paths:
       - "pipeline/**"
-      - "data/**"
-      - "data/bronze/estero_minutes_urls.txt"
+      - "backend/data/**"
+      - "backend/data/bronze/estero_minutes_urls.txt"
       - ".github/workflows/pipeline-ci.yml"
   pull_request:
     paths:
       - "pipeline/**"
-      - "data/**"
-      - "data/bronze/estero_minutes_urls.txt"
+      - "backend/data/**"
+      - "backend/data/bronze/estero_minutes_urls.txt"
       - ".github/workflows/pipeline-ci.yml"
   workflow_dispatch:
 
@@ -100,15 +100,15 @@ jobs:
           python pipeline/build.py
           --pdf-dir pdfs
           --source-csv pdfs/Estero_Meetings_Final.csv
-          --out-dir data
+          --out-dir backend/data
 
       - name: Verify committed deliverables match rebuild
         run: |
-          if ! git diff --exit-code --stat -- data/; then
-            git diff -- data/ > rebuild.diff
+          if ! git diff --exit-code --stat -- backend/data/; then
+            git diff -- backend/data/ > rebuild.diff
             echo ""
             echo "::error::data/ is out of date. Run:" \
-                 "python pipeline/build.py --pdf-dir pdfs --source-csv pdfs/Estero_Meetings_Final.csv --out-dir data," \
+                 "python pipeline/build.py --pdf-dir pdfs --source-csv pdfs/Estero_Meetings_Final.csv --out-dir backend/data," \
                  "then commit data/"
             exit 1
           fi
