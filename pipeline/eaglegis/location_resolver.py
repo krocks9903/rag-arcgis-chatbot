@@ -464,6 +464,10 @@ class ParcelClient:
                 a["_lon"] = c["x"]
                 a["_lat"] = c["y"]
             out.append(a)
+        # The service returns tied condo units in arbitrary order; sort so
+        # hits[0] (and the address label derived from it) is deterministic
+        # across runs — the CI rebuild guard diffs output byte-for-byte.
+        out.sort(key=lambda a: (str(a.get("SITEADDR") or ""), str(a.get("STRAP") or "")))
         return out
 
 
@@ -1080,9 +1084,6 @@ class LocationResolver:
             for seg in segs:
                 for path in seg.get("geometry", {}).get("paths", []):
                     chosen_paths.append(path)
-            confidence = 0.7
-        else:
-            confidence = 0.85
         if not chosen_paths:
             return None
         center = best_midpoint_across_paths(chosen_paths, prefer_core=True)

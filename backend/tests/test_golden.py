@@ -6,12 +6,12 @@ import os
 import sys
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import DEFAULT_CSV_PATH
+from data_loading import load_dataframe
 from keyword_path import answer_keyword
 from router import route_question
 from structured_path import answer_structured
@@ -23,7 +23,7 @@ GOLDEN_PATH = Path(__file__).parent / "golden_qa.json"
 def dataframe():
     if not Path(DEFAULT_CSV_PATH).exists():
         pytest.skip("data.csv not present")
-    return pd.read_csv(DEFAULT_CSV_PATH, encoding="utf-8")
+    return load_dataframe(DEFAULT_CSV_PATH)
 
 
 @pytest.fixture(scope="module")

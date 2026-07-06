@@ -441,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         "Document_Link",
     ]
     with args.output.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(out_rows)
 

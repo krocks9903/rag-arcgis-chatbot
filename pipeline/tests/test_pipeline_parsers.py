@@ -28,7 +28,6 @@ from eaglegis.extractors import (
     extract_date,
     infer_meeting_type,
     parse_date,
-    raw_pdf_url,
 )
 from eaglegis.sources import PdfAsset, iter_local_pdfs
 

@@ -167,7 +167,7 @@ location_id,item_id,address_raw,address_normalized,latitude,longitude,parcel_id,
 166,555,"9000 Williams Road, Estero, FL","9000 Williams Road, Estero, FL",26.420956750596,-81.80311832661,,1.0,,"9000 Williams Road, Estero, FL",Williams Road Improvements,,,1,true
 167,557,"9501 Spring Run Boulevard, Estero, FL","9501 Spring Run Boulevard, Estero, FL",26.395734095199,-81.797042452636,,1.0,,"9501 Spring Run Boulevard, Estero, FL",,,,1,true
 168,558,"Miromar Outlets, Estero, FL","Miromar Outlets, Estero, FL",26.438084,-81.772808,,1.0,,"Miromar Outlets, Estero, FL",Corkscrew Road,,,1,true
-169,560,21530 Strada Nuova Circle,21530 STRADA NUOVA CIR 102,26.429822613028506,-81.8043248748102,344625E12200CC102,0.92,,21530 STRADA NUOVA CIR 102,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=344625E12200CC102,1,true
+169,560,21530 Strada Nuova Circle,21530 STRADA NUOVA CIR,26.429822613028506,-81.8043248748102,344625E12200C00CE,0.92,,21530 STRADA NUOVA CIR,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=344625E12200C00CE,1,true
 170,561,10500 Corkscrew Road,"10500 Corkscrew Road, Estero, FL",26.430907704137,-81.783054229702,,1.0,,10500 Corkscrew Road,Corkscrew Road,,,1,true
 171,562,Williams Road and Three Oaks Parkway,WILLIAMS RD & THREE OAKS PKWY,26.4203700396588,-81.7883783801721,,0.93,,WILLIAMS RD & THREE OAKS PKWY,Williams Road Improvements,INTERSECTION,endpoint of segment with TOSTREET=THREE OAKS PKWY,1,true
 172,564,"8801 Corkscrew Road, Estero, FL","8801 Corkscrew Road, Estero, FL",26.434598214195,-81.807374237947,,1.0,,"8801 Corkscrew Road, Estero, FL",Corkscrew Road,,,1,true
@@ -202,7 +202,7 @@ location_id,item_id,address_raw,address_normalized,latitude,longitude,parcel_id,
 201,738,19950 S. Tamiami Trail,19950 S TAMIAMI TRL,26.450390144390827,-81.82081539161072,214625E4U18162582,0.98,,19950 S TAMIAMI TRL,,PARCEL_ADDRESS,parcel STRAP=214625E4U18162582,1,true
 202,739,12840 Corkscrew Road,"12840 Corkscrew Road, Estero, FL",26.449146368339,-81.742899851451,,1.0,,12840 Corkscrew Road,Corkscrew Road,,,1,true
 203,739,20161 Camellia Crosse Lane,"20161 Camellia Crosse Lane, Estero, FL",26.446950624905,-81.741493233359,,1.0,,20161 Camellia Crosse Lane,Corkscrew Road,,,2,false
-204,740,21530 Strada Nuova Circle,21530 STRADA NUOVA CIR 102,26.429822613028506,-81.8043248748102,344625E12200CC102,0.92,,21530 STRADA NUOVA CIR 102,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=344625E12200CC102,1,true
+204,740,21530 Strada Nuova Circle,21530 STRADA NUOVA CIR,26.429822613028506,-81.8043248748102,344625E12200C00CE,0.92,,21530 STRADA NUOVA CIR,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=344625E12200C00CE,1,true
 205,741,23421 Walden Center Drive,23421 WALDEN CENTER DR,26.396727649271075,-81.81122295278746,094725E3310000020,0.98,,23421 WALDEN CENTER DR,,PARCEL_ADDRESS,parcel STRAP=094725E3310000020,1,true
 206,744,9441 Corkscrew Palms Circle,9441 CORKSCREW PALMS CIR,26.430465596510277,-81.79763059961697,344625E11900000D1,0.98,,9441 CORKSCREW PALMS CIR,,PARCEL_ADDRESS,parcel STRAP=344625E11900000D1,1,true
 207,745,"Williams Road from US 41 to Three Oaks Parkway, Estero, FL","Williams Road from US 41 to Three Oaks Parkway, Estero, FL",26.420352499197,-81.799938484002,,0.9,,Williams Road,,,,1,true
@@ -343,7 +343,7 @@ location_id,item_id,address_raw,address_normalized,latitude,longitude,parcel_id,
 342,1267,"9401 Corkscrew Palms Circle, Estero, FL","9401 Corkscrew Palms Circle, Estero, FL",26.430490662544,-81.799280001688,,1.0,,"9401 Corkscrew Palms Circle, Estero, FL",,,,1,true
 343,1278,"Corkscrew Road & Puente Lane, Estero, FL","Corkscrew Road & Puente Lane, Estero, FL",26.431386394627,-81.784740920078,,1.0,,"Corkscrew Road & Puente Lane, Estero, FL",Corkscrew Road,,,1,true
 344,1291,23106 Fashion Drive,23106 FASHION DR,26.404355403292666,-81.80731508067035,094725E2360SC0010,0.98,,23106 FASHION DR,,PARCEL_ADDRESS,parcel STRAP=094725E2360SC0010,1,true
-345,1292,21530 Strada Nuova Circle,21530 STRADA NUOVA CIR 102,26.429822613028506,-81.8043248748102,344625E12200CC102,0.92,,21530 STRADA NUOVA CIR 102,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=344625E12200CC102,1,true
+345,1292,21530 Strada Nuova Circle,21530 STRADA NUOVA CIR,26.429822613028506,-81.8043248748102,344625E12200C00CE,0.92,,21530 STRADA NUOVA CIR,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=344625E12200C00CE,1,true
 346,1293,"8400 Murano Del Lago Drive, Estero, FL","8400 Murano Del Lago Drive, Estero, FL",26.3916729,-81.8086935,,1.0,,"8400 Murano Del Lago Drive, Estero, FL",,,,1,true
 347,1294,21180 Country Creek Drive,21180 COUNTRY CREEK DR,26.437389192896752,-81.79482782963828,274625E3050M000CE,0.98,,21180 COUNTRY CREEK DR,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=274625E3050M000CE,1,true
 348,1296,10081 Estero Town Commons Place,10081 ESTERO TOWN COMMONS PL,26.43076631928911,-81.78522309388235,354625E1390000020,0.98,,10081 ESTERO TOWN COMMONS PL,Corkscrew Road,PARCEL_ADDRESS,parcel STRAP=354625E1390000020,1,true
@@ -639,7 +639,7 @@ location_id,item_id,address_raw,address_normalized,latitude,longitude,parcel_id,
 638,2440,20511 Port Drive,20511 PORT DR,26.441805895225407,-81.82436864425183,294625E322000E270,0.98,,20511 PORT DR,,PARCEL_ADDRESS,parcel STRAP=294625E322000E270,1,true
 639,2443,"Corkscrew Road from Ben Hill Griffin Parkway to east of Bella Terra Boulevard, Estero, FL","Corkscrew Road from Ben Hill Griffin Parkway to east of Bella Terra Boulevard, Estero, FL",26.443916962688,-81.750022322755,,0.9,,Corkscrew Road Widening Corridor,Corkscrew Road,,,1,true
 640,2471,The Brooks,"The Brooks, Estero, FL",26.3926426,-81.7753764,,0.9,,"The Brooks, Estero, FL",Estero Parkway Improvements,NAMED_VENUE,named venue 'The Brooks' from LOCATION_SEEDS,1,true
-641,2481,3548 Cherry Blossom Court,3548 CHERRY BLOSSOM CT 203,26.423090922086303,-81.8151692312548,334625E4270250203,0.92,,3548 CHERRY BLOSSOM CT 203,Williams Road Improvements,PARCEL_ADDRESS,parcel STRAP=334625E4270250203,1,true
+641,2481,3548 Cherry Blossom Court,3548 CHERRY BLOSSOM CT 101,26.423090922086303,-81.8151692312548,334625E4270250101,0.92,,3548 CHERRY BLOSSOM CT 101,Williams Road Improvements,PARCEL_ADDRESS,parcel STRAP=334625E4270250101,1,true
 642,2482,8401 Mockingbird Lane,8401 MOCKINGBIRD LN,26.440986791396274,-81.8085330982752,284625E3U19382477,0.98,,8401 MOCKINGBIRD LN,,PARCEL_ADDRESS,parcel STRAP=284625E3U19382477,1,true
 643,2483,"Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL","Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL",26.420479,-81.80657,,0.95,,"Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL",,,,1,true
 644,2484,"River Ranch Road from Williams Road to Corkscrew Road, Estero, FL","River Ranch Road from Williams Road to Corkscrew Road, Estero, FL",26.425785502152,-81.794620501714,,0.95,,"River Ranch Road from Williams Road to Corkscrew Road, Estero, FL",,,,1,true
@@ -654,7 +654,7 @@ location_id,item_id,address_raw,address_normalized,latitude,longitude,parcel_id,
 653,2506,4406 and 4410 Coconut Road,"4406 and 4410 Coconut Road, Estero, FL",26.398566005006,-81.82671497661,,0.98,,4406 and 4410 Coconut Road,,,,1,true
 654,2513,4406 and 4410 Coconut Road,"4406 and 4410 Coconut Road, Estero, FL",26.398566005006,-81.82671497661,,0.98,,4406 and 4410 Coconut Road,,,,1,true
 655,2516,Pelican Sound,Pelican Sound Subdivision,26.42929045220349,-81.82471928963577,,0.85,,Pelican Sound Subdivision,,NEIGHBORHOOD,centroid of community 'Pelican Sound',1,true
-656,2520,20031 Seagrove Street,20031 SEAGROVE ST 1408,26.448417322049917,-81.76565306133051,254625E1210141408,0.92,,20031 SEAGROVE ST 1408,,PARCEL_ADDRESS,parcel STRAP=254625E1210141408,1,true
+656,2520,20031 Seagrove Street,20031 SEAGROVE ST 1401,26.448417322049917,-81.76565306133051,254625E1210141401,0.92,,20031 SEAGROVE ST 1401,,PARCEL_ADDRESS,parcel STRAP=254625E1210141401,1,true
 657,2523,"Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL","Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",26.448792003304,-81.803409304378,,0.9,,Estero Parkway,,,,1,true
 658,2528,"Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL","Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",26.448792003304,-81.803409304378,,0.95,,"Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",Estero Parkway Improvements,,,1,true
 659,2529,Pelican Sound,Pelican Sound Subdivision,26.42929045220349,-81.82471928963577,,0.85,,Pelican Sound Subdivision,Williams Road Improvements,NEIGHBORHOOD,centroid of community 'Pelican Sound',1,true

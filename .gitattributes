@@ -1,0 +1,3 @@
+# Pipeline deliverables are compared byte-for-byte by the CI rebuild guard;
+# keep CSVs LF on every platform (the pipeline writer emits LF explicitly).
+*.csv text eol=lf

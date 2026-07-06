@@ -25,7 +25,6 @@ from eaglegis.config import (
 )
 from eaglegis.location_resolver import LocationReference, LocationResolver
 from eaglegis.extractors import (
-    extract_actions,
     extract_agenda_entries,
     extract_date,
     extract_end_time,
@@ -1006,7 +1005,6 @@ class NormalizedBuilder:
         candidate_source: str,
         evidence: str,
     ) -> None:
-        key = (item_id, location_id, candidate_address.lower())
         for row in self.location_candidates:
             if (
                 row["item_id"] == item_id
