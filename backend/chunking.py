@@ -7,6 +7,8 @@ from typing import Any
 import pandas as pd
 from langchain.schema import Document
 
+from schema_aliases import row_value
+
 
 def _short_name(raw_name: str) -> str:
     name = re.split(r"\s*\((?:DOS|DCI|LDO|ADD|CPA|REZ)\d{4}", str(raw_name))[0].strip()
@@ -14,24 +16,24 @@ def _short_name(raw_name: str) -> str:
 
 
 def build_search_header(fields: dict[str, Any]) -> str:
-    raw_name = str(fields.get("ProjectName", ""))
-    location = str(fields.get("Location", "") or fields.get("LocationName", ""))
-    app_id = str(fields.get("ApplicationID", ""))
-    date = str(fields.get("MeetingDate", ""))
-    outcome = str(fields.get("Outcome", "") or fields.get("ActionTaken", "") or fields.get("Status", ""))
+    raw_name = row_value(fields, "project_name")
+    location = row_value(fields, "location")
+    app_id = row_value(fields, "application_id")
+    date = row_value(fields, "meeting_date")
+    outcome = row_value(fields, "outcome", "action_taken", "status")
     header_parts = filter(None, [_short_name(raw_name), app_id, location, outcome[:60], date])
     return "SEARCH: " + " | ".join(header_parts)
 
 
 def _format_fields(fields: dict[str, Any]) -> str:
-    keys = (
-        "ProjectName", "ApplicationID", "Location", "LocationName", "MeetingDate",
-        "MeetingYear", "Status", "Summary", "ActionTaken", "Outcome", "Document_Link",
+    logical_keys = (
+        "project_name", "application_id", "location", "meeting_date",
+        "meeting_year", "status", "summary", "action_taken", "outcome", "document_url",
     )
     lines = []
-    for key in keys:
-        val = fields.get(key)
-        if val is not None and str(val).strip():
+    for key in logical_keys:
+        val = row_value(fields, key)
+        if val:
             lines.append(f"{key}: {val}")
     return "\n".join(lines)
 
@@ -40,11 +42,11 @@ def rows_to_chunks(df: pd.DataFrame, summary_min_len: int = 200) -> list[Documen
     chunks: list[Document] = []
     for idx, row in df.iterrows():
         fields = {k: ("" if pd.isna(v) else v) for k, v in row.to_dict().items()}
-        app_id = str(fields.get("ApplicationID", ""))
+        app_id = row_value(fields, "application_id")
         base_meta = {
             "application_id": app_id,
             "row_index": int(idx),
-            "meeting_year": str(fields.get("MeetingYear", "")),
+            "meeting_year": row_value(fields, "meeting_year"),
         }
         header = build_search_header(fields)
         body = _format_fields(fields)
@@ -54,7 +56,7 @@ def rows_to_chunks(df: pd.DataFrame, summary_min_len: int = 200) -> list[Documen
                 metadata={**base_meta, "chunk_id": f"{idx}-meta", "chunk_type": "meta"},
             )
         )
-        summary = str(fields.get("Summary", ""))
+        summary = row_value(fields, "summary")
         if len(summary) >= summary_min_len:
             chunks.append(
                 Document(
@@ -62,7 +64,7 @@ def rows_to_chunks(df: pd.DataFrame, summary_min_len: int = 200) -> list[Documen
                     metadata={**base_meta, "chunk_id": f"{idx}-summary", "chunk_type": "summary"},
                 )
             )
-        action = str(fields.get("ActionTaken", "") or fields.get("Outcome", ""))
+        action = row_value(fields, "action_taken", "outcome")
         if len(action) >= summary_min_len:
             chunks.append(
                 Document(

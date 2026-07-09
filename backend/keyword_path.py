@@ -7,28 +7,30 @@ import pandas as pd
 
 from models import ChatResponse, RouteKind
 from router import APP_ID_RE, YEAR_RE
+from schema_aliases import pick_column, search_columns
 from structured_path import _row_to_project
 
 
 def answer_keyword(df: pd.DataFrame, question: str) -> ChatResponse:
     out = df.copy()
     app_m = APP_ID_RE.search(question)
-    if app_m and "ApplicationID" in out.columns:
+    app_col = pick_column(out, "application_id")
+    if app_m and app_col:
         needle = app_m.group(1).upper()
-        out = out[out["ApplicationID"].astype(str).str.upper().str.contains(needle, na=False)]
+        out = out[out[app_col].astype(str).str.upper().str.contains(needle, na=False)]
     else:
         year_m = YEAR_RE.search(question)
-        if year_m and "MeetingYear" in out.columns:
-            out = out[out["MeetingYear"].astype(str) == year_m.group(1)]
+        year_col = pick_column(out, "meeting_year")
+        if year_m and year_col:
+            out = out[out[year_col].astype(str) == year_m.group(1)]
         tokens = [t for t in re.findall(r"[a-z0-9]{3,}", question.lower()) if t not in {
             "the", "and", "for", "what", "show", "minutes", "meeting", "estero",
         }]
         if tokens:
             mask = pd.Series(False, index=out.index)
-            for col in ("ApplicationID", "ProjectName", "Location", "LocationName", "Filename"):
-                if col in out.columns:
-                    for tok in tokens:
-                        mask |= out[col].astype(str).str.contains(tok, case=False, na=False)
+            for col in search_columns(out):
+                for tok in tokens:
+                    mask |= out[col].astype(str).str.contains(tok, case=False, na=False)
             if mask.any():
                 out = out[mask]
 
