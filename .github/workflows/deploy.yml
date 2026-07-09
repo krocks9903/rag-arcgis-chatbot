@@ -51,6 +51,5 @@ jobs:
             --max-instances 5 \
             --timeout 300 \
             --cpu-boost \
-            --startup-probe-type http \
-            --startup-probe-path /ready \
+            --startup-probe=initialDelaySeconds=0,timeoutSeconds=10,periodSeconds=10,failureThreshold=30,httpGet.port=8080,httpGet.path=/ready \
             --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},SERVE_FRONTEND=false,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=BAAI/bge-reranker-base"
