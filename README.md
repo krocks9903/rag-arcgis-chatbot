@@ -4,11 +4,24 @@ Router-first Q&A for Estero planning & zoning records: structured filters, keywo
 
 ## What you need
 
-- Python 3.11
+- Python 3.11 **or** Docker Desktop
 - Groq API key (`GROQ_API_KEY`)
-- Optional: GCP credentials for Cloud Run deploy
+- Optional: GCP account for Cloud Run deploy
 
-## Quick start
+## Quick start (Docker — recommended)
+
+```powershell
+cd T:\eagleGIS\rag-arcgis-chatbot
+copy backend\.env.example backend\.env   # add GROQ_API_KEY
+docker compose up --build
+```
+
+- Frontend: http://localhost:3000  
+- API: http://localhost:8080/docs  
+
+Full local + Google Cloud instructions: **[docs/DEPLOY_DOCKER.md](docs/DEPLOY_DOCKER.md)**
+
+## Quick start (Python only)
 
 ```powershell
 cd backend
@@ -72,6 +85,10 @@ rag-arcgis-chatbot/
 │   ├── orchestrator.py
 │   └── tests/golden_qa.json
 ├── frontend/
+│   ├── config.js        # API_BASE for Docker / Cloud Run
+│   └── ...
+├── docker-compose.yml   # local free stack (api + nginx)
+├── docs/DEPLOY_DOCKER.md
 └── scripts/eval_ragas.py
 ```
 
@@ -83,11 +100,13 @@ rag-arcgis-chatbot/
 
 ## Production frontend
 
-Set before `app.js` when API is on a different host:
+`frontend/config.js` sets `API_BASE`. For Cloud Run, point it at your service URL:
 
-```html
-<script>window.API_BASE = "https://your-service.run.app";</script>
+```javascript
+window.API_BASE = "https://your-service-abc.run.app";
 ```
+
+See [docs/DEPLOY_DOCKER.md](docs/DEPLOY_DOCKER.md) for the full Google setup.
 
 ## Notes
 
