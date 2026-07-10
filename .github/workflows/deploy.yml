@@ -8,6 +8,7 @@ on:
       - "frontend/**"
       - "backend/data/gold/meetings_ai_public.csv"
       - ".github/workflows/deploy.yml"
+      - ".github/workflows/pipeline-refresh.yml"
   workflow_dispatch:
 
 permissions:
