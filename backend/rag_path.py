@@ -57,11 +57,16 @@ _llm: ChatGroq | None = None
 def get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not set")
         _llm = ChatGroq(
             model=GROQ_MODEL,
-            groq_api_key=os.getenv("GROQ_API_KEY"),
+            groq_api_key=api_key,
             temperature=0.0,
             max_tokens=1500,
+            timeout=60,
+            max_retries=1,
         )
     return _llm
 

@@ -375,34 +375,38 @@ async function sendMessage(overrideText) {
   startChat(); questionEl.value=""; autoResize(questionEl);
   appendMsg("user", q); showTyping();
   try {
-    try {
-      const streamed = await tryStreamChat(q);
-      if (streamed) return;
-    } catch (streamErr) {
-      console.warn("Stream failed, falling back to /chat:", streamErr);
-    }
+    // Prefer /chat on Cloud Run: SSE is often buffered, and a mid-stream
+    // timeout used to leave an empty bubble with no fallback.
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: q }),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const data = await res.json();
       removeTyping();
-      appendMsg("bot", "⚠️ Backend error " + res.status + ": " + (err.detail || "Unknown error"));
+      if (data.projects || data.summary || data.answer) {
+        appendBotResponse(data);
+        return;
+      }
+      appendMsg("bot", "I received an empty response from the backend. Please try again.");
       return;
     }
-    const data = await res.json();
+    // Fall back to stream only if /chat failed (e.g. gateway quirks).
+    console.warn("/chat failed with", res.status, "— trying stream");
+    try {
+      const streamed = await tryStreamChat(q);
+      if (streamed) return;
+    } catch (streamErr) {
+      console.warn("Stream failed:", streamErr);
+    }
+    const err = await res.json().catch(() => ({}));
     removeTyping();
-    if (data.projects || data.summary || data.answer) {
-      appendBotResponse(data);
-      return;
-    }
-    appendMsg("bot", "I received an empty response from the backend. Please try again.");
+    appendMsg("bot", "⚠️ Backend error " + res.status + ": " + (err.detail || "Unknown error"));
   } catch (e) {
     removeTyping();
     console.error("Fetch error:", e);
-    appendMsg("bot", `⚠️ Could not reach the backend at ${API_BASE}. Is uvicorn running?`);
+    appendMsg("bot", `⚠️ Could not reach the backend at ${API_BASE}. The request may have timed out — try a more specific question (e.g. an Application ID).`);
   }
 }
 

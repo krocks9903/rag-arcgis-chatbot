@@ -87,6 +87,23 @@ def chat(req: ChatRequest):
         raise HTTPException(500, str(e)) from e
 
 
+@app.get("/warmup")
+def warmup():
+    """Touch retrieval + LLM so the first user question is not a cold start."""
+    from retrieval import get_reranker
+
+    store = get_store()
+    ready = store is not None and store.is_ready()
+    reranker_ok = False
+    try:
+        get_reranker()
+        reranker_ok = True
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(503, f"Reranker warmup failed: {e}") from e
+    return {"status": "warm", "chain_ready": ready, "reranker": reranker_ok}
+
+
 @app.post("/chat/stream")
 def chat_stream(req: ChatRequest):
     try:

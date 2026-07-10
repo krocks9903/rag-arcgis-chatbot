@@ -22,7 +22,7 @@ COPY frontend/ /app/frontend
 
 # Pre-download models and bake FAISS + BM25 index for fast Cloud Run cold starts.
 RUN mkdir -p /app/backend/.cache/huggingface /app/backend/.cache/sentence-transformers \
-    && python -c "from store import build_store; from config import DEFAULT_CSV_PATH; build_store(DEFAULT_CSV_PATH)"
+    && python -c "from store import build_store; from config import DEFAULT_CSV_PATH; build_store(DEFAULT_CSV_PATH); from retrieval import get_reranker; get_reranker()"
 
 EXPOSE 8080
 
