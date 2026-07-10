@@ -8,10 +8,13 @@ venv/
 
 # Vector store index (rebuilt on startup)
 faiss_index/
+backend/faiss_index/
 
-# Data files (add your own)
-data/*.csv
-!data/data.csv
+# Pipeline caches (Lee County API responses, pytest)
+.cache/
+.pytest_cache/
+.test_tmp/
+.tmp/
 
 # OS
 .DS_Store

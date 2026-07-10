@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     if os.path.exists(DEFAULT_CSV_PATH):
         build_store(DEFAULT_CSV_PATH)
     else:
-        print(f"No CSV at {DEFAULT_CSV_PATH} — upload via /load or add data.csv")
+        print(f"No CSV at {DEFAULT_CSV_PATH} — run pipeline/build.py or upload via /load")
     yield
 
 

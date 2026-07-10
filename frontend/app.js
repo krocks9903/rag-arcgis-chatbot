@@ -1,9 +1,26 @@
-// API base: set window.API_BASE before this script, or use same-origin / local dev.
+// API base: config.js may set window.API_BASE; otherwise same-origin (Cloud Run) or local dev.
 const API_BASE = (typeof window !== "undefined" && window.API_BASE)
   ? window.API_BASE.replace(/\/$/, "")
   : (window.location.port === "8000" || window.location.hostname === "localhost"
       ? "http://localhost:8000"
       : window.location.origin);
+
+async function refreshRecordCount() {
+  const el = document.getElementById("record-count");
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    if (data.record_count != null) {
+      el.textContent = `Live data · ${data.record_count} records`;
+      return;
+    }
+  } catch (_) {
+    /* fall through to map count */
+  }
+}
+
+refreshRecordCount();
 
 require(["esri/WebMap","esri/views/MapView","esri/widgets/Home","esri/widgets/Zoom","esri/widgets/Search"],
 function(WebMap, MapView, Home, Zoom, Search) {
@@ -14,13 +31,15 @@ function(WebMap, MapView, Home, Zoom, Search) {
   view.ui.add(new Search({ view }), "top-right");
   window._mapView = view;
   webmap.when(() => {
+    const el = document.getElementById("record-count");
+    if (el.textContent !== "Live data · loading…") return;
     let total = 0;
     const qs = webmap.layers.toArray().filter(l=>l.type==="feature")
       .map(l=>l.load().then(()=>l.queryFeatureCount().then(n=>{total+=n;})));
     Promise.all(qs).then(()=>{
-      document.getElementById("record-count").textContent=`Live data · ${total} records`;
+      el.textContent=`Live data · ${total} map features`;
     }).catch(()=>{
-      document.getElementById("record-count").textContent="Live data · connected";
+      el.textContent="Live data · connected";
     });
   });
 });

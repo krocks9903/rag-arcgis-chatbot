@@ -11,7 +11,8 @@ INDEX_DIR = os.path.join(BACKEND_DIR, "faiss_index")
 MANIFEST_FILE = os.path.join(INDEX_DIR, "manifest.json")
 BM25_FILE = os.path.join(INDEX_DIR, "bm25_corpus.json")
 DATA_DIR = os.path.join(BACKEND_DIR, "data")
-DEFAULT_CSV_PATH = os.path.join(DATA_DIR, "data.csv")
+GOLD_CSV_PATH = os.path.join(DATA_DIR, "gold", "meetings_ai_public.csv")
+DEFAULT_CSV_PATH = os.getenv("CSV_PATH", GOLD_CSV_PATH)
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
@@ -26,7 +27,3 @@ CHUNK_SUMMARY_MIN = int(os.getenv("CHUNK_SUMMARY_MIN", "200"))
 
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "").lower() in {"1", "true", "yes"}
 SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "true").lower() not in {"0", "false", "no"}
-EAGLEGIS_CSV_URL = os.getenv(
-    "EAGLEGIS_CSV_URL",
-    "https://raw.githubusercontent.com/EagleGIS-FGCU/EagleGIS/main/app/data/gold/meetings_ai_public.csv",
-)

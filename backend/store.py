@@ -15,6 +15,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from rank_bm25 import BM25Okapi
 
 from chunking import rows_to_chunks
+from schema_aliases import load_dataframe
 from config import (
     BM25_FILE,
     CHUNK_SUMMARY_MIN,
@@ -113,7 +114,7 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
     )
 
     emb = get_embeddings()
-    df = pd.read_csv(csv_path, encoding="utf-8")
+    df = load_dataframe(csv_path)
     store = DataStore(csv_path=csv_path, dataframe=df, record_count=len(df), embeddings=emb)
 
     if cache_ok:

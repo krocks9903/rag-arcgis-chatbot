@@ -1,12 +1,13 @@
 # RAG ArcGIS Chatbot
 
-Router-first Q&A for Estero planning & zoning records: structured filters, keyword lookup, and corrective RAG with hybrid retrieval.
+Router-first Q&A for Estero planning & zoning records: structured filters, keyword lookup, and corrective RAG with hybrid retrieval. The EagleGIS PDF extraction pipeline lives in this repo and produces the chatbot corpus.
 
 ## What you need
 
 - Python 3.11 **or** Docker Desktop
 - Groq API key (`GROQ_API_KEY`)
 - Optional: GCP account for Cloud Run deploy
+- Pipeline rebuild: Tesseract OCR (`apt install tesseract-ocr` on Linux)
 
 ## Quick start (Docker — recommended)
 
@@ -34,16 +35,14 @@ uvicorn app:app --reload --port 8000
 
 Open http://localhost:8000 — the API serves the frontend when `SERVE_FRONTEND=true` (default).
 
-Or serve the frontend separately on port 3000 (`python -m http.server 3000` in `frontend/`).
-
 ## Pipeline architecture
 
 ```text
 Question → Router
   ├─ structured  → pandas filters (counts, year, status, location)
   ├─ keyword     → ApplicationID / minutes / token search
-  ├─ mixed       → keyword first, else RAG
-  └─ rag         → BM25 + FAISS (RRF) → reranker → CRAG → Groq JSON
+  ├─ mixed         → keyword first, else RAG
+  └─ rag           → BM25 + FAISS (RRF) → reranker → CRAG → Groq JSON
 ```
 
 | Component | Default |
@@ -63,53 +62,71 @@ Production Docker/Cloud Run can set `EMBEDDING_MODEL=BAAI/bge-m3` for higher qua
 | `GET /ready` | Readiness (index loaded) |
 | `POST /chat` | Structured JSON answer |
 | `POST /chat/stream` | SSE stream (`meta` → `token` → `done`) |
-| `POST /load` | Upload replacement CSV |
+| `POST /load` | Upload replacement CSV (dev only) |
 
 ## Project structure
 
 ```text
 rag-arcgis-chatbot/
 ├── .github/workflows/
-│   ├── ci.yml           # lint + pytest + optional RAGAS
-│   ├── deploy.yml       # Cloud Run (opt-in)
-│   └── sync-data.yml    # weekly EagleGIS gold CSV sync
+│   ├── ci.yml                  # lint + backend pytest
+│   ├── deploy.yml              # Cloud Run (opt-in)
+│   ├── pipeline-ci.yml         # pipeline tests + rebuild guard
+│   ├── pipeline-refresh.yml    # weekly scrape + rebuild + commit
+│   └── pipeline-drift-watch.yml
 ├── backend/
-│   ├── app.py           # FastAPI + static frontend
+│   ├── app.py                  # FastAPI + static frontend
 │   ├── config.py
-│   ├── store.py         # FAISS + BM25 index
-│   ├── retrieval.py     # hybrid RRF + rerank
-│   ├── router.py
-│   ├── structured_path.py
-│   ├── keyword_path.py
-│   ├── rag_path.py      # CRAG + Groq
-│   ├── orchestrator.py
+│   ├── store.py                # FAISS + BM25 index
+│   ├── data/
+│   │   ├── bronze/             # hand-curated geocode overrides, URL lookup
+│   │   ├── silver/             # relational tables + QA triage
+│   │   └── gold/
+│   │       └── meetings_ai_public.csv   # chatbot corpus (~2,600 agenda items)
 │   └── tests/golden_qa.json
 ├── frontend/
-│   ├── config.js        # API_BASE for Docker / Cloud Run
+│   ├── config.js               # API_BASE for split local stack
 │   └── ...
-├── docker-compose.yml   # local free stack (api + nginx)
-├── docs/DEPLOY_DOCKER.md
-└── scripts/eval_ragas.py
+├── pipeline/                   # EagleGIS PDF-extraction pipeline
+│   ├── build.py
+│   ├── discover.py
+│   ├── verify.py
+│   └── tests/
+├── pdfs/                       # source meeting-minute PDFs
+├── docker-compose.yml
+└── docs/DEPLOY_DOCKER.md
 ```
 
-## CI / data sync
+## Data pipeline
 
-- **CI** runs router + golden Q&A tests without a Groq key.
-- **sync-data.yml** pulls `meetings_ai_public.csv` from EagleGIS every Monday.
-- **RAGAS eval** (`workflow_dispatch` + `GROQ_API_KEY`): `python scripts/eval_ragas.py`
+The `pipeline/` directory parses meeting-minute PDFs from `pdfs/` into medallion CSVs under `backend/data/`, resolves locations against Lee County parcel data, and exports `backend/data/gold/meetings_ai_public.csv` — the file the chatbot indexes.
 
-## Production frontend
-
-`frontend/config.js` sets `API_BASE`. For Cloud Run, point it at your service URL:
-
-```javascript
-window.API_BASE = "https://your-service-abc.run.app";
+```bash
+pip install -r pipeline/requirements.txt
+python pipeline/build.py --pdf-dir pdfs --source-csv pdfs/Estero_Meetings_Final.csv --out-dir backend/data
+python pipeline/verify.py
+python -m pytest pipeline/tests -q
 ```
 
-See [docs/DEPLOY_DOCKER.md](docs/DEPLOY_DOCKER.md) for the full Google setup.
+See [`pipeline/README.md`](pipeline/README.md) for full details.
+
+**Autonomous updates:** `pipeline-refresh.yml` runs weekly (and on new PDFs): scrapes estero-fl.gov for new minutes, rebuilds, verifies against Lee County parcels, and commits `backend/data/`. `pipeline-ci.yml` fails any PR whose committed data doesn't match a fresh rebuild.
+
+## CI
+
+- **ci.yml** — ruff + backend router/golden/smoke tests (no Groq key required)
+- **pipeline-ci.yml** — pipeline pytest + deliverables up-to-date guard
+- **pipeline-refresh.yml** — weekly data refresh from source PDFs
+- **deploy.yml** — Cloud Run deploy when `ENABLE_DEPLOY=true`
+
+## Production
+
+Cloud Run serves the frontend and API from one container (`SERVE_FRONTEND=true`). The UI uses same-origin API calls; no `config.js` changes needed on Cloud Run.
+
+Set `ENABLE_DEPLOY=true` and GCP secrets/vars per [docs/DEPLOY_DOCKER.md](docs/DEPLOY_DOCKER.md).
 
 ## Notes
 
-- Index is rebuilt when `data.csv` changes (hash in `faiss_index/manifest.json`).
-- Set `SERVE_FRONTEND=false` in Cloud Run when frontend is hosted elsewhere.
+- Corpus path: `backend/data/gold/meetings_ai_public.csv` (override with `CSV_PATH`)
+- Index is rebuilt when the CSV changes (hash in `faiss_index/manifest.json`)
 - Optional tracing: `OTEL_ENABLED=true` + `pip install -r requirements-eval.txt`

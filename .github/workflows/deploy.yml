@@ -6,6 +6,7 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "backend/data/gold/meetings_ai_public.csv"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
@@ -46,7 +47,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 8080 \
-            --memory 2Gi \
+            --memory 4Gi \
             --cpu 1 \
             --min-instances 0 \
             --max-instances 5 \
