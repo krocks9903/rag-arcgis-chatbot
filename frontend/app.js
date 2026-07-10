@@ -271,6 +271,25 @@ function showTyping() {
 }
 function removeTyping() { const t=document.getElementById("typing-row"); if(t)t.remove(); }
 
+function parseSseFrames(buffer, onPayload) {
+  // Cloud Run / proxies may use CRLF; normalize before splitting frames.
+  const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const parts = normalized.split("\n\n");
+  const rest = parts.pop() || "";
+  for (const part of parts) {
+    const line = part.trim();
+    if (!line.startsWith("data:")) continue;
+    const jsonText = line.slice(5).trim();
+    if (!jsonText) continue;
+    try {
+      onPayload(JSON.parse(jsonText));
+    } catch (err) {
+      console.warn("SSE JSON parse failed:", err, jsonText.slice(0, 200));
+    }
+  }
+  return rest;
+}
+
 async function tryStreamChat(question) {
   const res = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
@@ -282,45 +301,69 @@ async function tryStreamChat(question) {
   removeTyping();
   const row = document.createElement("div");
   row.className = "msg-row";
-  row.innerHTML = `<div class="msg-bot"><div class="bot-avatar">🏛</div><div class="bubble" id="stream-bubble"></div></div>`;
-  messagesEl.appendChild(row);
-  const bubble = document.getElementById("stream-bubble");
+  const botDiv = document.createElement("div");
+  botDiv.className = "msg-bot";
+  const avatar = document.createElement("div");
+  avatar.className = "bot-avatar";
+  avatar.textContent = "🏛";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
   const proseEl = document.createElement("div");
   bubble.appendChild(proseEl);
+  botDiv.appendChild(avatar);
+  botDiv.appendChild(bubble);
+  row.appendChild(botDiv);
+  messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let donePayload = null;
+  let sawError = false;
+
+  const handlePayload = (payload) => {
+    if (payload.type === "token" && payload.text) {
+      proseEl.textContent += payload.text;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    } else if (payload.type === "done") {
+      donePayload = payload;
+    } else if (payload.type === "error") {
+      sawError = true;
+      proseEl.textContent = "⚠️ " + (payload.detail || "Stream error");
+    }
+  };
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() || "";
-    for (const part of parts) {
-      if (!part.startsWith("data: ")) continue;
-      const payload = JSON.parse(part.slice(6));
-      if (payload.type === "token" && payload.text) {
-        proseEl.textContent += payload.text;
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      } else if (payload.type === "done") {
-        donePayload = payload;
-      } else if (payload.type === "error") {
-        proseEl.textContent = "⚠️ " + (payload.detail || "Stream error");
-      }
-    }
+    buffer = parseSseFrames(buffer, handlePayload);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    parseSseFrames(buffer + "\n\n", handlePayload);
   }
 
   if (donePayload) {
     const projects = (donePayload.projects || []).map(normalizeProject);
-    const summary = (donePayload.summary || "").trim();
+    const summary = (donePayload.summary || donePayload.answer || "").trim();
     if (summary && !proseEl.textContent.trim()) {
       proseEl.innerHTML = summary.replace(/\n/g, "<br>");
     }
     projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
+    if (!proseEl.textContent.trim() && projects.length === 0) {
+      proseEl.textContent = "Sorry, I couldn't find an answer.";
+    }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return true;
+  }
+
+  // Stream opened but produced no usable done event — remove empty bubble
+  // and let sendMessage fall back to POST /chat.
+  if (!sawError && !proseEl.textContent.trim()) {
+    row.remove();
+    return false;
   }
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return true;
@@ -332,8 +375,12 @@ async function sendMessage(overrideText) {
   startChat(); questionEl.value=""; autoResize(questionEl);
   appendMsg("user", q); showTyping();
   try {
-    const streamed = await tryStreamChat(q);
-    if (streamed) return;
+    try {
+      const streamed = await tryStreamChat(q);
+      if (streamed) return;
+    } catch (streamErr) {
+      console.warn("Stream failed, falling back to /chat:", streamErr);
+    }
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -347,19 +394,11 @@ async function sendMessage(overrideText) {
     }
     const data = await res.json();
     removeTyping();
-    if (data.projects || data.summary) {
+    if (data.projects || data.summary || data.answer) {
       appendBotResponse(data);
       return;
     }
-    let answer = (data.answer || data.response || "Sorry, I couldn't find an answer.")
-      .replace(/```json[\s\S]*?```/g, "")
-      .replace(/```[\s\S]*?```/g, "")
-      .trim();
-    if (!answer) {
-      appendMsg("bot", "I received an empty response from the backend. Please try again.");
-      return;
-    }
-    appendMsg("bot", answer);
+    appendMsg("bot", "I received an empty response from the backend. Please try again.");
   } catch (e) {
     removeTyping();
     console.error("Fetch error:", e);
