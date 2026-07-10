@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # verify.py is stdlib-only: no pip install, no tesseract needed.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
