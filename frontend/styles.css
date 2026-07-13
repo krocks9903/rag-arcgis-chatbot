@@ -144,8 +144,7 @@
     #input-footer { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 8px; }
 
     /* DATASET BAR */
-    #dataset-bar { padding: 8px 16px; background: var(--gold-light); border-top: 1px solid #f0d9a8; display: flex; align-items: center; gap: 8px; }
-    #dataset-bar label { font-size: 12px; font-weight: 600; color: var(--navy); white-space: nowrap; }
+    #dataset-bar { display: none; }
     #csv-file-input { font-size: 12px; flex: 1; }
     #load-btn { padding: 5px 14px; border-radius: 8px; background: var(--navy); color: #fff; border: none; font-size: 12px; font-weight: 600; cursor: pointer; }
     #load-btn:hover { background: var(--navy-dark); }
