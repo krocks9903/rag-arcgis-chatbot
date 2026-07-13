@@ -17,20 +17,25 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ vars.ENABLE_DEPLOY == 'true' }}
+    if: >-
+      ${{
+        vars.ENABLE_DEPLOY == 'true' &&
+        secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+        secrets.GCP_SERVICE_ACCOUNT != ''
+      }}
     name: Build & deploy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Authenticate to Google Cloud (Workload Identity Federation)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Build & push image
         run: |
@@ -55,4 +60,4 @@ jobs:
             --timeout 300 \
             --cpu-boost \
             --startup-probe=initialDelaySeconds=0,timeoutSeconds=10,periodSeconds=10,failureThreshold=30,httpGet.port=8080,httpGet.path=/ready \
-            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},SERVE_FRONTEND=true,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=BAAI/bge-reranker-base"
+            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},SERVE_FRONTEND=true,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,CRAG_MAX_ITERS=1,RERANK_CANDIDATES=8,DENSE_K=12,SPARSE_K=12"

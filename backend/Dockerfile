@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TRANSFORMERS_CACHE=/app/backend/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/backend/.cache/sentence-transformers \
     EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
-    RERANKER_MODEL=BAAI/bge-reranker-base \
+    RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 \
     SERVE_FRONTEND=true
 
 WORKDIR /app/backend

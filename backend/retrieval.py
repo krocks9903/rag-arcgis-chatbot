@@ -6,7 +6,15 @@ from typing import Any
 from langchain.schema import Document
 from sentence_transformers import CrossEncoder
 
-from config import DENSE_K, RERANKER_MODEL, RERANK_K, SCORE_THRESHOLD, SPARSE_K
+from config import (
+    DENSE_K,
+    ENABLE_RERANKER,
+    RERANK_CANDIDATES,
+    RERANKER_MODEL,
+    RERANK_K,
+    SCORE_THRESHOLD,
+    SPARSE_K,
+)
 from store import DataStore, _tokenize
 
 _reranker: CrossEncoder | None = None
@@ -33,7 +41,7 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> list[tuple
 
 
 def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]]:
-    """Dense FAISS + BM25 via RRF, then cross-encoder rerank."""
+    """Dense FAISS + BM25 via RRF, then optional cross-encoder rerank."""
     if store.vectorstore is None or store.bm25 is None:
         return []
 
@@ -50,12 +58,16 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
     fused = reciprocal_rank_fusion([dense_ranking, sparse_ranking])
     doc_map = _doc_by_id(store)
     candidates: list[Document] = []
-    for doc_id, _ in fused[: max(DENSE_K, SPARSE_K)]:
+    for doc_id, _ in fused[:RERANK_CANDIDATES]:
         if doc_id in doc_map:
             candidates.append(doc_map[doc_id])
 
     if not candidates:
         return [(d, float(s)) for d, s in dense_hits[:RERANK_K]]
+
+    if not ENABLE_RERANKER:
+        # Use RRF order; invent descending scores so graders still work.
+        return [(d, 1.0 - (i * 0.05)) for i, d in enumerate(candidates[:RERANK_K])]
 
     reranker = get_reranker()
     pairs = [(query, d.page_content) for d in candidates]

@@ -265,11 +265,45 @@ function appendMsg(role, content) {
 }
 
 function showTyping() {
-  const row = document.createElement("div"); row.id="typing-row"; row.className="msg-row";
-  row.innerHTML=`<div class="msg-bot"><div class="bot-avatar">🏛</div><div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;
-  messagesEl.appendChild(row); messagesEl.scrollTop=messagesEl.scrollHeight;
+  const row = document.createElement("div");
+  row.id = "typing-row";
+  row.className = "msg-row";
+  row.innerHTML = `
+    <div class="msg-bot">
+      <div class="bot-avatar">🏛</div>
+      <div class="typing-wrap">
+        <div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <div class="typing-status" id="typing-status">Searching meeting records…</div>
+      </div>
+    </div>`;
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  const statuses = [
+    "Searching meeting records…",
+    "Matching projects and locations…",
+    "Writing an answer… this can take up to a minute",
+  ];
+  let i = 0;
+  window._typingTimer = setInterval(() => {
+    i = Math.min(i + 1, statuses.length - 1);
+    const el = document.getElementById("typing-status");
+    if (el) el.textContent = statuses[i];
+  }, 4000);
 }
-function removeTyping() { const t=document.getElementById("typing-row"); if(t)t.remove(); }
+function removeTyping() {
+  if (window._typingTimer) {
+    clearInterval(window._typingTimer);
+    window._typingTimer = null;
+  }
+  const t = document.getElementById("typing-row");
+  if (t) t.remove();
+}
+function setSending(busy) {
+  const btn = document.getElementById("send-btn");
+  if (btn) btn.disabled = !!busy;
+  if (questionEl) questionEl.disabled = !!busy;
+}
 
 function parseSseFrames(buffer, onPayload) {
   // Cloud Run / proxies may use CRLF; normalize before splitting frames.
@@ -373,7 +407,7 @@ async function sendMessage(overrideText) {
   const q = (overrideText || questionEl.value).trim();
   if (!q) return;
   startChat(); questionEl.value=""; autoResize(questionEl);
-  appendMsg("user", q); showTyping();
+  appendMsg("user", q); setSending(true); showTyping();
   try {
     // Prefer /chat on Cloud Run: SSE is often buffered, and a mid-stream
     // timeout used to leave an empty bubble with no fallback.
@@ -407,6 +441,8 @@ async function sendMessage(overrideText) {
     removeTyping();
     console.error("Fetch error:", e);
     appendMsg("bot", `⚠️ Could not reach the backend at ${API_BASE}. The request may have timed out — try a more specific question (e.g. an Application ID).`);
+  } finally {
+    setSending(false);
   }
 }
 

@@ -15,15 +15,20 @@ GOLD_CSV_PATH = os.path.join(DATA_DIR, "gold", "meetings_ai_public.csv")
 DEFAULT_CSV_PATH = os.getenv("CSV_PATH", GOLD_CSV_PATH)
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
+# MiniLM cross-encoder is ~5–10× faster on Cloud Run CPU than bge-reranker-base.
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
-DENSE_K = int(os.getenv("DENSE_K", "15"))
-SPARSE_K = int(os.getenv("SPARSE_K", "15"))
+DENSE_K = int(os.getenv("DENSE_K", "12"))
+SPARSE_K = int(os.getenv("SPARSE_K", "12"))
 RERANK_K = int(os.getenv("RERANK_K", "5"))
-SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.35"))
-CRAG_MAX_ITERS = int(os.getenv("CRAG_MAX_ITERS", "2"))
+# How many fused hits to score with the cross-encoder (biggest CPU cost).
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "8"))
+SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.25"))
+# One retrieve pass by default; set 2 to enable CRAG rewrite retry.
+CRAG_MAX_ITERS = int(os.getenv("CRAG_MAX_ITERS", "1"))
 CHUNK_SUMMARY_MIN = int(os.getenv("CHUNK_SUMMARY_MIN", "200"))
+ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "true").lower() not in {"0", "false", "no"}
 
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "").lower() in {"1", "true", "yes"}
 SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "true").lower() not in {"0", "false", "no"}
