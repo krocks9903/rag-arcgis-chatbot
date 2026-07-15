@@ -17,15 +17,21 @@ permissions:
 
 jobs:
   deploy:
-    if: >-
-      ${{
-        vars.ENABLE_DEPLOY == 'true' &&
-        secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
-        secrets.GCP_SERVICE_ACCOUNT != ''
-      }}
+    # Note: GitHub does not allow `secrets` in job-level `if` expressions.
+    if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     name: Build & deploy
     runs-on: ubuntu-latest
     steps:
+      - name: Require GCP deploy secrets
+        env:
+          WIF: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$WIF" ] || [ -z "$SA" ]; then
+            echo "::error::Missing GCP_WORKLOAD_IDENTITY_PROVIDER or GCP_SERVICE_ACCOUNT secret."
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Authenticate to Google Cloud (Workload Identity Federation)
