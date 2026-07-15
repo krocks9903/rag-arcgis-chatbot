@@ -98,6 +98,17 @@
     .msg-bot .bubble li { margin-bottom: 4px; }
     .msg-bot .bubble strong { font-weight: 600; color: var(--navy); }
 
+    .stale-notice {
+      margin-top: 12px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #7a5a10;
+      background: #fbf3dd;
+      border: 1px solid #e6d39a;
+      border-radius: 8px;
+    }
+
     /* FIX 2: project cards */
     .proj-card {
       background: var(--white); border: 1px solid var(--border);

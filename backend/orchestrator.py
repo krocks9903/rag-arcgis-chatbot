@@ -26,6 +26,7 @@ from rag_path import (
     stream_groq_summary,
 )
 from router import route_question
+from stale_sources import attach_stale_source_notice
 from store import get_store
 from structured_path import answer_structured
 from tracing import trace_span
@@ -77,11 +78,13 @@ def answer_question(question: str) -> ChatResponse:
                 result = answer_rag(store, question)
         total_ms = round((time.perf_counter() - t0) * 1000)
         result.meta["latency_ms"] = total_ms
+        attach_stale_source_notice(result)
         logger.info(
-            "answer_question route=%s mode=%s total_ms=%s",
+            "answer_question route=%s mode=%s total_ms=%s stale=%s",
             result.route,
             result.meta.get("llm_mode") or result.meta.get("paths"),
             total_ms,
+            result.meta.get("stale_sources"),
         )
         return result
 
@@ -100,6 +103,7 @@ def stream_answer(question: str) -> Iterator[str]:
     if route == RouteKind.STRUCTURED:
         result = answer_structured(store.dataframe, question)
         result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+        attach_stale_source_notice(result)
         yield _sse({"type": "done", **result.model_dump()})
         return
 
@@ -108,6 +112,7 @@ def stream_answer(question: str) -> Iterator[str]:
         if route == RouteKind.MIXED:
             shortcut.route = RouteKind.MIXED.value
         shortcut.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+        attach_stale_source_notice(shortcut)
         yield _sse({"type": "done", **shortcut.model_dump()})
         return
 
@@ -171,6 +176,7 @@ def stream_answer(question: str) -> Iterator[str]:
                     "latency_ms": round((time.perf_counter() - t0) * 1000),
                 },
             )
+            attach_stale_source_notice(result)
             yield _sse({"type": "done", **result.model_dump()})
             return
         except Exception as e:
@@ -187,6 +193,7 @@ def stream_answer(question: str) -> Iterator[str]:
     result.meta["generate_ms"] = round((time.perf_counter() - t_gen) * 1000)
     result.meta["ttft_ms"] = first_token_ms
     result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+    attach_stale_source_notice(result)
     yield _sse({"type": "done", **result.model_dump()})
 
 

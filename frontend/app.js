@@ -326,6 +326,15 @@ function formatProse(proseEl, prose) {
   }
 }
 
+function renderStaleNotice(meta) {
+  if (!meta || !meta.stale_sources || !meta.stale_notice) return null;
+  const el = document.createElement("div");
+  el.className = "stale-notice";
+  el.setAttribute("role", "status");
+  el.textContent = meta.stale_notice;
+  return el;
+}
+
 function appendBotResponse(data) {
   const row = document.createElement("div");
   row.className = "msg-row";
@@ -347,6 +356,8 @@ function appendBotResponse(data) {
     ensureMarked().then(() => formatProse(proseEl, prose));
   }
   projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
+  const staleEl = renderStaleNotice(data.meta);
+  if (staleEl) bubble.appendChild(staleEl);
   if (!prose && projects.length === 0) {
     bubble.appendChild(document.createElement("div")).textContent =
       "Sorry, I couldn't find an answer.";
@@ -516,6 +527,8 @@ async function tryStreamChat(question) {
         formatProse(proseEl, summary);
       }
       projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
+      const staleEl = renderStaleNotice(donePayload.meta);
+      if (staleEl) bubble.appendChild(staleEl);
       if (!proseEl.textContent.trim() && !proseEl.querySelector("li") && projects.length === 0) {
         proseEl.textContent = "Sorry, I couldn't find an answer.";
       }

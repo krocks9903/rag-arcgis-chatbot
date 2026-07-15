@@ -1,6 +1,8 @@
-"""Hybrid dense+sparse retrieval with RRF fusion and cross-encoder reranking."""
+"""Hybrid dense+sparse retrieval with RRF fusion, cross-encoder reranking, and recency."""
 from __future__ import annotations
 
+import re
+from datetime import date, datetime
 from typing import Any
 
 from langchain.schema import Document
@@ -8,7 +10,10 @@ from sentence_transformers import CrossEncoder
 
 from config import (
     DENSE_K,
+    ENABLE_RECENCY_BOOST,
     ENABLE_RERANKER,
+    RECENCY_BOOST,
+    RECENCY_HALF_LIFE_DAYS,
     RERANK_CANDIDATES,
     RERANKER_MODEL,
     RERANK_K,
@@ -18,6 +23,10 @@ from config import (
 from store import DataStore, _tokenize
 
 _reranker: CrossEncoder | None = None
+_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+_DATE_BODY_RE = re.compile(r"meeting_date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+_YEAR_BODY_RE = re.compile(r"meeting_year:\s*(20\d{2})", re.IGNORECASE)
+_ISO_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 
 def get_reranker() -> CrossEncoder:
@@ -36,8 +45,85 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> list[tuple
     return sorted(scores.items(), key=lambda x: -x[1])
 
 
+def document_meeting_date(doc: Document) -> date | None:
+    """Resolve a meeting date from metadata or chunk text."""
+    raw = str(doc.metadata.get("meeting_date") or "").strip()
+    for candidate in (raw,):
+        if not candidate:
+            continue
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(candidate[:10], fmt).date()
+            except ValueError:
+                continue
+    text = doc.page_content or ""
+    m = _DATE_BODY_RE.search(text) or _ISO_RE.search(text)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    yraw = str(doc.metadata.get("meeting_year") or "").strip()
+    ym = _YEAR_BODY_RE.search(text)
+    year_s = yraw or (ym.group(1) if ym else "")
+    if year_s.isdigit():
+        try:
+            return date(int(year_s), 6, 30)  # mid-year fallback
+        except ValueError:
+            return None
+    return None
+
+
+def recency_score(meeting: date | None, *, today: date | None = None) -> float:
+    """1.0 ≈ today, decays toward 0 with age (exponential half-life)."""
+    if meeting is None:
+        return 0.25
+    today = today or date.today()
+    age_days = max(0, (today - meeting).days)
+    half = max(1.0, RECENCY_HALF_LIFE_DAYS)
+    return float(0.5 ** (age_days / half))
+
+
+def apply_recency_boost(
+    ranked: list[tuple[Document, float]],
+    query: str,
+    *,
+    boost: float | None = None,
+) -> list[tuple[Document, float]]:
+    """Re-rank by relevance + recency (or prefer an explicit year in the query)."""
+    if not ENABLE_RECENCY_BOOST or not ranked:
+        return ranked
+    weight = RECENCY_BOOST if boost is None else boost
+    if weight <= 0:
+        return ranked
+
+    year_m = _YEAR_RE.search(query or "")
+    target_year = int(year_m.group(1)) if year_m else None
+    today = date.today()
+
+    rescored: list[tuple[Document, float]] = []
+    for doc, score in ranked:
+        meeting = document_meeting_date(doc)
+        if target_year is not None:
+            # Historical query: prefer that year instead of "newest overall".
+            if meeting and meeting.year == target_year:
+                r = 1.0
+            elif meeting and abs(meeting.year - target_year) <= 1:
+                r = 0.45
+            else:
+                r = 0.1
+        else:
+            r = recency_score(meeting, today=today)
+        # Keep original score on metadata for debugging.
+        doc.metadata["recency"] = round(r, 4)
+        if meeting:
+            doc.metadata["meeting_date"] = meeting.isoformat()
+        rescored.append((doc, float(score) + weight * r))
+    return sorted(rescored, key=lambda x: -x[1])
+
+
 def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]]:
-    """Dense FAISS + BM25 via RRF, then optional cross-encoder rerank."""
+    """Dense FAISS + BM25 via RRF, then optional cross-encoder rerank + recency."""
     if store.vectorstore is None or store.bm25 is None:
         return []
 
@@ -60,11 +146,11 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
             candidates.append(doc_map[doc_id])
 
     if not candidates:
-        return [(d, float(s)) for d, s in dense_hits[:RERANK_K]]
+        return apply_recency_boost([(d, float(s)) for d, s in dense_hits[:RERANK_K]], query)
 
     if not ENABLE_RERANKER:
-        # Use RRF order; invent descending scores so graders still work.
-        return [(d, 1.0 - (i * 0.05)) for i, d in enumerate(candidates[:RERANK_K])]
+        ranked = [(d, 1.0 - (i * 0.05)) for i, d in enumerate(candidates[: max(RERANK_K * 2, RERANK_K)])]
+        return apply_recency_boost(ranked, query)[:RERANK_K]
 
     reranker = get_reranker()
     pairs = [(query, d.page_content) for d in candidates]
@@ -72,7 +158,8 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
     # Always coerce to Python float — numpy.float32 is not JSON-serializable.
     ranked = [(d, float(s)) for d, s in sorted(zip(candidates, scores), key=lambda x: -float(x[1]))]
     filtered = [(d, s) for d, s in ranked if s >= SCORE_THRESHOLD]
-    return (filtered or ranked)[:RERANK_K]
+    pool = filtered or ranked
+    return apply_recency_boost(pool, query)[:RERANK_K]
 
 
 def format_docs(hits: list[tuple[Document, float]]) -> str:
@@ -90,4 +177,5 @@ def hits_meta(hits: list[tuple[Document, float]]) -> dict[str, Any]:
         "retrieved": len(hits),
         "best_score": round(best_score(hits), 4),
         "chunk_ids": [d.metadata.get("chunk_id") for d, _ in hits],
+        "meeting_dates": [d.metadata.get("meeting_date") for d, _ in hits],
     }

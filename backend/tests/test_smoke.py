@@ -70,6 +70,67 @@ def test_format_summary_bullets():
     assert format_summary_bullets("- One thing.\n- Two thing.") == "- One thing.\n- Two thing."
 
 
+def test_stale_source_notice_when_older_than_five_years():
+    from datetime import date
+
+    from models import ChatResponse, ProjectOut
+    from stale_sources import attach_stale_source_notice, stale_notice_meta
+
+    meta = stale_notice_meta(
+        [date(2018, 5, 1), date(2024, 1, 1)],
+        today=date(2026, 7, 15),
+        threshold_years=5,
+    )
+    assert meta["stale_sources"] is True
+    assert "2018-05-01" in meta["stale_notice"]
+    assert "2018-05-01" in meta["stale_source_dates"]
+
+    fresh = stale_notice_meta([date(2024, 1, 1)], today=date(2026, 7, 15), threshold_years=5)
+    assert fresh["stale_sources"] is False
+
+    result = ChatResponse(
+        summary="- something",
+        projects=[ProjectOut(title="Old", date="01/15/2019")],
+        answer="- something",
+    )
+    attach_stale_source_notice(result)
+    assert result.meta.get("stale_sources") is True
+    assert "stale_notice" in result.meta
+
+
+def test_recency_boost_prefers_newer_when_no_year():
+    from langchain.schema import Document
+    from retrieval import apply_recency_boost
+
+    older = Document(
+        page_content="meeting_date: 2018-01-01\nSummary: old road work",
+        metadata={"chunk_id": "old", "meeting_date": "2018-01-01"},
+    )
+    newer = Document(
+        page_content="meeting_date: 2025-06-01\nSummary: new road work",
+        metadata={"chunk_id": "new", "meeting_date": "2025-06-01"},
+    )
+    # Same relevance score — recency should put 2025 first.
+    ranked = apply_recency_boost([(older, 1.0), (newer, 1.0)], "Corkscrew Road", boost=0.5)
+    assert ranked[0][0].metadata["chunk_id"] == "new"
+
+
+def test_recency_boost_honors_year_in_query():
+    from langchain.schema import Document
+    from retrieval import apply_recency_boost
+
+    d2018 = Document(
+        page_content="meeting_date: 2018-05-01\nSummary: approved in 2018",
+        metadata={"chunk_id": "y2018", "meeting_date": "2018-05-01"},
+    )
+    d2025 = Document(
+        page_content="meeting_date: 2025-05-01\nSummary: approved in 2025",
+        metadata={"chunk_id": "y2025", "meeting_date": "2025-05-01"},
+    )
+    ranked = apply_recency_boost([(d2025, 1.0), (d2018, 1.0)], "What was approved in 2018?", boost=0.5)
+    assert ranked[0][0].metadata["chunk_id"] == "y2018"
+
+
 def test_keyword_shortcut_for_app_id():
     from keyword_path import is_strong_keyword_hit
     from models import ChatResponse, ProjectOut

@@ -47,6 +47,7 @@ def rows_to_chunks(df: pd.DataFrame, summary_min_len: int = 200) -> list[Documen
             "application_id": app_id,
             "row_index": int(idx),
             "meeting_year": row_value(fields, "meeting_year"),
+            "meeting_date": row_value(fields, "meeting_date"),
         }
         header = build_search_header(fields)
         body = _format_fields(fields)

@@ -33,6 +33,24 @@ def csv_hash(path: str) -> str:
     return h.hexdigest()
 
 
+_DATE_IN_CHUNK = re.compile(r"meeting_date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+_YEAR_IN_CHUNK = re.compile(r"meeting_year:\s*(20\d{2})", re.IGNORECASE)
+
+
+def _metadata_from_chunk(chunk_id: str, text: str) -> dict[str, Any]:
+    """Recover date fields when reloading a BM25 corpus that only stored text."""
+    meta: dict[str, Any] = {"chunk_id": chunk_id}
+    dm = _DATE_IN_CHUNK.search(text or "")
+    if dm:
+        meta["meeting_date"] = dm.group(1)
+        meta["meeting_year"] = dm.group(1)[:4]
+    else:
+        ym = _YEAR_IN_CHUNK.search(text or "")
+        if ym:
+            meta["meeting_year"] = ym.group(1)
+    return meta
+
+
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", text.lower())
 
@@ -133,7 +151,10 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
         store.bm25_ids = ids
         store.bm25 = BM25Okapi([_tokenize(t) for t in corpus])
         store.documents = [
-            Document(page_content=text, metadata={"chunk_id": cid})
+            Document(
+                page_content=text,
+                metadata=_metadata_from_chunk(cid, text),
+            )
             for cid, text in zip(ids, corpus)
         ]
         store.chunk_count = manifest.get("chunk_count", len(store.documents))

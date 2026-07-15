@@ -31,12 +31,19 @@ DENSE_K = int(os.getenv("DENSE_K", "12"))
 SPARSE_K = int(os.getenv("SPARSE_K", "12"))
 RERANK_K = int(os.getenv("RERANK_K", "5"))
 # How many fused hits to score with the cross-encoder (biggest CPU cost).
-RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "4"))
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "8"))
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.25"))
 # One retrieve pass by default; set 2 to enable CRAG rewrite retry.
 CRAG_MAX_ITERS = int(os.getenv("CRAG_MAX_ITERS", "1"))
 CHUNK_SUMMARY_MIN = int(os.getenv("CHUNK_SUMMARY_MIN", "200"))
 ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "true").lower() not in {"0", "false", "no"}
+# Prefer newer meeting records in RAG ranking (0 disables).
+ENABLE_RECENCY_BOOST = os.getenv("ENABLE_RECENCY_BOOST", "true").lower() not in {"0", "false", "no"}
+RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.35"))
+# Days until a record's recency score halves (≈3 years).
+RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "1095"))
+# Warn users when an answer cites meeting records older than this many years.
+STALE_SOURCE_YEARS = float(os.getenv("STALE_SOURCE_YEARS", "5"))
 
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "").lower() in {"1", "true", "yes"}
 SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "true").lower() not in {"0", "false", "no"}
