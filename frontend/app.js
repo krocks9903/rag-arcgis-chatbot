@@ -21,9 +21,57 @@ async function refreshRecordCount() {
 }
 
 refreshRecordCount();
+fetch(`${API_BASE}/warmup`).catch(() => {});
 
 const WEBMAP_ID = "93eef5bd592f48b4a04e20815dba13b6";
 const WEBMAP_OPEN_URL = `https://www.arcgis.com/apps/mapviewer/index.html?webmap=${WEBMAP_ID}`;
+const ARCGIS_CSS = "https://js.arcgis.com/4.30/esri/themes/light/main.css";
+const ARCGIS_JS = "https://js.arcgis.com/4.30/";
+const MARKED_JS = "https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js";
+
+let _arcgisLoading = null;
+let _mapStarted = false;
+let _markedLoading = null;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve();
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Failed to load " + src));
+    document.head.appendChild(s);
+  });
+}
+
+function loadCss(href) {
+  if (document.querySelector(`link[href="${href}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+}
+
+function ensureMarked() {
+  if (typeof marked !== "undefined") return Promise.resolve();
+  if (_markedLoading) return _markedLoading;
+  _markedLoading = loadScript(MARKED_JS).catch((err) => {
+    console.warn("marked load failed:", err);
+  });
+  return _markedLoading;
+}
+
+function loadArcGisApi() {
+  if (typeof require === "function") return Promise.resolve();
+  if (_arcgisLoading) return _arcgisLoading;
+  loadCss(ARCGIS_CSS);
+  _arcgisLoading = loadScript(ARCGIS_JS);
+  return _arcgisLoading;
+}
 
 function showMapFallback(message) {
   const el = document.getElementById("map-fallback");
@@ -33,66 +81,92 @@ function showMapFallback(message) {
 }
 
 function initMap() {
-  if (typeof require !== "function") {
-    showMapFallback("ArcGIS API did not load (blocked network or ad blocker).");
-    return;
+  if (_mapStarted) return;
+  _mapStarted = true;
+  const fallback = document.getElementById("map-fallback");
+  if (fallback) {
+    fallback.classList.add("visible");
+    fallback.textContent = "Loading map…";
   }
-  require(
-    ["esri/WebMap", "esri/views/MapView", "esri/widgets/Home", "esri/widgets/Zoom", "esri/widgets/Search"],
-    function (WebMap, MapView, Home, Zoom, Search) {
-      const fallback = document.getElementById("map-fallback");
-      const webmap = new WebMap({ portalItem: { id: WEBMAP_ID } });
-      const view = new MapView({
-        container: "viewDiv",
-        map: webmap,
-        ui: { components: [] },
-      });
-      view.ui.add(new Zoom({ view }), "top-left");
-      view.ui.add(new Home({ view }), "top-left");
-      view.ui.add(new Search({ view }), "top-right");
-      window._mapView = view;
 
-      view.when(() => {
-        if (fallback) fallback.classList.remove("visible");
-        // Layout can settle after flex/grid paint — force a resize.
-        setTimeout(() => view.resize(), 50);
-        setTimeout(() => view.resize(), 300);
-      }).catch((err) => {
-        console.error("MapView failed:", err);
-        showMapFallback("Map view failed to start.");
-      });
+  loadArcGisApi()
+    .then(() => {
+      if (typeof require !== "function") {
+        showMapFallback("ArcGIS API did not load (blocked network or ad blocker).");
+        return;
+      }
+      require(
+        ["esri/WebMap", "esri/views/MapView", "esri/widgets/Home", "esri/widgets/Zoom", "esri/widgets/Search"],
+        function (WebMap, MapView, Home, Zoom, Search) {
+          const webmap = new WebMap({ portalItem: { id: WEBMAP_ID } });
+          const view = new MapView({
+            container: "viewDiv",
+            map: webmap,
+            ui: { components: [] },
+          });
+          view.ui.add(new Zoom({ view }), "top-left");
+          view.ui.add(new Home({ view }), "top-left");
+          view.ui.add(new Search({ view }), "top-right");
+          window._mapView = view;
 
-      webmap.when(() => {
-        const el = document.getElementById("record-count");
-        if (el && el.textContent === "Live data · loading…") {
-          let total = 0;
-          const qs = webmap.layers
-            .toArray()
-            .filter((l) => l.type === "feature")
-            .map((l) =>
-              l.load().then(() => l.queryFeatureCount().then((n) => { total += n; }))
-            );
-          Promise.all(qs)
-            .then(() => { el.textContent = `Live data · ${total} map features`; })
-            .catch(() => { el.textContent = "Live data · connected"; });
+          view.when(() => {
+            if (fallback) fallback.classList.remove("visible");
+            setTimeout(() => view.resize(), 50);
+            setTimeout(() => view.resize(), 300);
+          }).catch((err) => {
+            console.error("MapView failed:", err);
+            showMapFallback("Map view failed to start.");
+          });
+
+          webmap.when(() => {
+            const el = document.getElementById("record-count");
+            if (el && el.textContent === "Live data · loading…") {
+              let total = 0;
+              const qs = webmap.layers
+                .toArray()
+                .filter((l) => l.type === "feature")
+                .map((l) =>
+                  l.load().then(() => l.queryFeatureCount().then((n) => { total += n; }))
+                );
+              Promise.all(qs)
+                .then(() => { el.textContent = `Live data · ${total} map features`; })
+                .catch(() => { el.textContent = "Live data · connected"; });
+            }
+          }).catch((err) => {
+            console.error("WebMap failed:", err);
+            showMapFallback("Could not load the Estero web map.");
+          });
+        },
+        function (err) {
+          console.error("ArcGIS modules failed to load:", err);
+          showMapFallback("ArcGIS map modules failed to load.");
         }
-      }).catch((err) => {
-        console.error("WebMap failed:", err);
-        showMapFallback("Could not load the Estero web map.");
-      });
-    },
-    function (err) {
-      console.error("ArcGIS modules failed to load:", err);
-      showMapFallback("ArcGIS map modules failed to load.");
-    }
-  );
+      );
+    })
+    .catch((err) => {
+      console.error("ArcGIS script failed:", err);
+      showMapFallback("ArcGIS API failed to load.");
+    });
+}
+
+function scheduleDeferredMap() {
+  const start = () => initMap();
+  // Desktop: idle after first paint. Mobile: wait until map panel is shown.
+  const wantsMapNow = window.matchMedia("(min-width: 901px)").matches;
+  if (!wantsMapNow) return;
+  if ("requestIdleCallback" in window) {
+    requestIdleCallback(start, { timeout: 2500 });
+  } else {
+    setTimeout(start, 1200);
+  }
 }
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initMap);
+  document.addEventListener("DOMContentLoaded", scheduleDeferredMap);
 } else {
-  initMap();
+  scheduleDeferredMap();
 }
+
 
 const messagesEl = document.getElementById("messages");
 const heroEl     = document.getElementById("hero");
@@ -231,6 +305,20 @@ function renderProjectCard(p) {
   return card;
 }
 
+function formatProse(proseEl, prose) {
+  try {
+    if (typeof marked !== "undefined" && marked.parse) {
+      proseEl.innerHTML = marked.parse(prose);
+    } else if (typeof marked !== "undefined" && typeof marked === "function") {
+      proseEl.innerHTML = marked(prose);
+    } else {
+      proseEl.innerHTML = prose.replace(/\n/g, "<br>");
+    }
+  } catch (e) {
+    proseEl.innerHTML = prose.replace(/\n/g, "<br>");
+  }
+}
+
 function appendBotResponse(data) {
   const row = document.createElement("div");
   row.className = "msg-row";
@@ -246,18 +334,9 @@ function appendBotResponse(data) {
   bubble.className = "bubble";
   if (prose) {
     const proseEl = document.createElement("div");
-    try {
-      if (typeof marked !== "undefined" && marked.parse) {
-        proseEl.innerHTML = marked.parse(prose);
-      } else if (typeof marked !== "undefined" && typeof marked === "function") {
-        proseEl.innerHTML = marked(prose);
-      } else {
-        proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-      }
-    } catch (e) {
-      proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-    }
+    proseEl.innerHTML = prose.replace(/\n/g, "<br>");
     bubble.appendChild(proseEl);
+    ensureMarked().then(() => formatProse(proseEl, prose));
   }
   projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
   if (!prose && projects.length === 0) {
@@ -283,21 +362,9 @@ function appendMsg(role, content) {
     const bubble = document.createElement("div"); bubble.className = "bubble";
     if (prose) {
       const proseEl = document.createElement("div");
-      try {
-        // marked@4 uses synchronous marked.parse()
-        if (typeof marked !== "undefined" && marked.parse) {
-          proseEl.innerHTML = marked.parse(prose);
-        } else if (typeof marked !== "undefined" && typeof marked === "function") {
-          proseEl.innerHTML = marked(prose);
-        } else {
-          // Plain text fallback — convert newlines to <br>
-          proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-        }
-      } catch(e) {
-        console.warn("marked error:", e);
-        proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-      }
+      proseEl.innerHTML = prose.replace(/\n/g, "<br>");
       bubble.appendChild(proseEl);
+      ensureMarked().then(() => formatProse(proseEl, prose));
     }
     // Project cards
     projects.forEach(p => bubble.appendChild(renderProjectCard(p)));
@@ -459,8 +526,13 @@ async function sendMessage(overrideText) {
   startChat(); questionEl.value=""; autoResize(questionEl);
   appendMsg("user", q); setSending(true); showTyping();
   try {
-    // Prefer /chat on Cloud Run: SSE is often buffered, and a mid-stream
-    // timeout used to leave an empty bubble with no fallback.
+    // Prefer streaming so tokens appear during retrieval + generation.
+    try {
+      const streamed = await tryStreamChat(q);
+      if (streamed) return;
+    } catch (streamErr) {
+      console.warn("Stream failed, falling back to /chat:", streamErr);
+    }
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -475,14 +547,6 @@ async function sendMessage(overrideText) {
       }
       appendMsg("bot", "I received an empty response from the backend. Please try again.");
       return;
-    }
-    // Fall back to stream only if /chat failed (e.g. gateway quirks).
-    console.warn("/chat failed with", res.status, "— trying stream");
-    try {
-      const streamed = await tryStreamChat(q);
-      if (streamed) return;
-    } catch (streamErr) {
-      console.warn("Stream failed:", streamErr);
     }
     const err = await res.json().catch(() => ({}));
     removeTyping();
@@ -550,5 +614,6 @@ function expandMap(e) {
 function toggleMobileMap() {
   const panel = document.getElementById("map-panel");
   panel.classList.toggle("mobile-show");
+  if (panel.classList.contains("mobile-show")) initMap();
   if (window._mapView) setTimeout(() => window._mapView.resize(), 100);
 }

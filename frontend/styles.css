@@ -7,7 +7,7 @@
       --success: #16a34a; --success-bg: #f0fdf4;
       --warning-bg: #fffbeb; --warning: #b45309;
       --denied-bg: #fef2f2; --denied: #b91c1c;
-      --font: 'Inter', system-ui, sans-serif;
+      --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     html, body { height: 100%; background: var(--bg); font-family: var(--font); overflow: hidden; }
 
@@ -43,7 +43,7 @@
     }
     #hero-bg {
       position: absolute; inset: 0; z-index: 0;
-      background-image: url('assets/img-d2bd2e241123.png');
+      background-image: url('assets/hero.webp');
       background-size: cover; background-position: center 60%;
       filter: brightness(0.38);
     }

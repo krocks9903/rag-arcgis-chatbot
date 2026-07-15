@@ -23,7 +23,7 @@ DENSE_K = int(os.getenv("DENSE_K", "12"))
 SPARSE_K = int(os.getenv("SPARSE_K", "12"))
 RERANK_K = int(os.getenv("RERANK_K", "5"))
 # How many fused hits to score with the cross-encoder (biggest CPU cost).
-RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "8"))
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "4"))
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.25"))
 # One retrieve pass by default; set 2 to enable CRAG rewrite retry.
 CRAG_MAX_ITERS = int(os.getenv("CRAG_MAX_ITERS", "1"))

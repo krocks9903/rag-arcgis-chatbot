@@ -8,10 +8,11 @@ import traceback
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import DATA_DIR, DEFAULT_CSV_PATH, EMBEDDING_MODEL, FRONTEND_DIR, SERVE_FRONTEND
 from models import ChatRequest, ChatResponse
@@ -22,12 +23,53 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BACKEND_DIR, ".env"))
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def _warm_models() -> dict[str, bool]:
+    """Load reranker + LLM and run one retrieve so the first user question is warm."""
+    from rag_path import get_llm
+    from retrieval import get_reranker, hybrid_retrieve
+
+    store = get_store()
+    ready = store is not None and store.is_ready()
+    reranker_ok = False
+    llm_ok = False
+    retrieve_ok = False
+    if ready:
+        get_reranker()
+        reranker_ok = True
+        hybrid_retrieve(store, "Estero planning zoning")
+        retrieve_ok = True
+        try:
+            get_llm()
+            llm_ok = True
+        except Exception as e:
+            logger.warning("LLM warmup skipped: %s", e)
+    return {
+        "chain_ready": ready,
+        "reranker": reranker_ok,
+        "llm": llm_ok,
+        "retrieve": retrieve_ok,
+    }
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.path.exists(DEFAULT_CSV_PATH):
         build_store(DEFAULT_CSV_PATH)
+        # Warm models in the background so /ready is not blocked for the startup probe.
+        import threading
+
+        def _bg_warm():
+            try:
+                status = _warm_models()
+                logger.info("Startup warmup: %s", status)
+            except Exception:
+                traceback.print_exc()
+                logger.warning("Startup warmup failed; first RAG request may be slow")
+
+        threading.Thread(target=_bg_warm, daemon=True, name="model-warmup").start()
     else:
         print(f"No CSV at {DEFAULT_CSV_PATH} — run pipeline/build.py or upload via /load")
     yield
@@ -41,6 +83,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class StaticCacheMiddleware(BaseHTTPMiddleware):
+    """Long-cache hashed/static frontend assets."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/assets/") or path.endswith((".css", ".js", ".png", ".webp", ".jpg", ".svg")):
+            response.headers.setdefault("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+        return response
+
+
+app.add_middleware(StaticCacheMiddleware)
 
 
 def _record_count() -> int:
@@ -90,18 +146,18 @@ def chat(req: ChatRequest):
 @app.get("/warmup")
 def warmup():
     """Touch retrieval + LLM so the first user question is not a cold start."""
-    from retrieval import get_reranker
-
-    store = get_store()
-    ready = store is not None and store.is_ready()
-    reranker_ok = False
     try:
-        get_reranker()
-        reranker_ok = True
+        status = _warm_models()
+        if not status["chain_ready"]:
+            raise HTTPException(503, "Index not loaded")
+        if not status["reranker"]:
+            raise HTTPException(503, "Reranker warmup failed")
+        return {"status": "warm", **status}
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(503, f"Reranker warmup failed: {e}") from e
-    return {"status": "warm", "chain_ready": ready, "reranker": reranker_ok}
+        raise HTTPException(503, f"Warmup failed: {e}") from e
 
 
 @app.post("/chat/stream")

@@ -61,9 +61,26 @@ jobs:
             --port 8080 \
             --memory 4Gi \
             --cpu 1 \
-            --min-instances 0 \
+            --min-instances 1 \
             --max-instances 5 \
             --timeout 300 \
             --cpu-boost \
             --startup-probe=initialDelaySeconds=0,timeoutSeconds=10,periodSeconds=10,failureThreshold=30,httpGet.port=8080,httpGet.path=/ready \
-            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},SERVE_FRONTEND=true,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,CRAG_MAX_ITERS=1,RERANK_CANDIDATES=8,DENSE_K=12,SPARSE_K=12"
+            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},SERVE_FRONTEND=true,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,CRAG_MAX_ITERS=1,RERANK_CANDIDATES=4,DENSE_K=12,SPARSE_K=12"
+
+      - name: Warm service after deploy
+        run: |
+          URL=$(gcloud run services describe "${{ vars.SERVICE_NAME }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+          echo "Warming $URL …"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sf "$URL/ready" >/dev/null; then
+              curl -sf "$URL/warmup" || true
+              echo "Warmup complete"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning::Service did not become ready in time for warmup"
+          exit 0

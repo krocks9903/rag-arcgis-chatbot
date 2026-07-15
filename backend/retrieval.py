@@ -28,10 +28,6 @@ def get_reranker() -> CrossEncoder:
     return _reranker
 
 
-def _doc_by_id(store: DataStore) -> dict[str, Document]:
-    return {d.metadata.get("chunk_id", str(i)): d for i, d in enumerate(store.documents)}
-
-
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> list[tuple[str, float]]:
     scores: dict[str, float] = {}
     for ranking in rankings:
@@ -56,7 +52,8 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
     ]
 
     fused = reciprocal_rank_fusion([dense_ranking, sparse_ranking])
-    doc_map = _doc_by_id(store)
+    doc_map = store.doc_by_id()
+
     candidates: list[Document] = []
     for doc_id, _ in fused[:RERANK_CANDIDATES]:
         if doc_id in doc_map:

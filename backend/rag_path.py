@@ -64,7 +64,7 @@ def get_llm() -> ChatGroq:
             model=GROQ_MODEL,
             groq_api_key=api_key,
             temperature=0.0,
-            max_tokens=1500,
+            max_tokens=700,
             timeout=60,
             max_retries=1,
         )
@@ -143,8 +143,14 @@ def generate_answer(question: str, context: str, route: str = RouteKind.RAG.valu
 
 
 def answer_rag(store: DataStore, question: str) -> ChatResponse:
+    import time
+
+    t0 = time.perf_counter()
     context, crag_meta = retrieve_with_crag(store, question)
+    crag_meta["retrieve_ms"] = round((time.perf_counter() - t0) * 1000)
+    t1 = time.perf_counter()
     result = generate_answer(question, context)
+    crag_meta["generate_ms"] = round((time.perf_counter() - t1) * 1000)
     result.route = RouteKind.RAG.value
     result.meta.update(crag_meta)
     return result

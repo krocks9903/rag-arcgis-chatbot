@@ -48,9 +48,18 @@ class DataStore:
     record_count: int = 0
     chunk_count: int = 0
     embeddings: HuggingFaceEmbeddings | None = None
+    _doc_by_id: dict[str, Document] | None = field(default=None, repr=False)
 
     def is_ready(self) -> bool:
         return self.vectorstore is not None and self.bm25 is not None and not self.dataframe.empty
+
+    def doc_by_id(self) -> dict[str, Document]:
+        if self._doc_by_id is None:
+            self._doc_by_id = {
+                d.metadata.get("chunk_id", str(i)): d for i, d in enumerate(self.documents)
+            }
+        return self._doc_by_id
+
 
 
 _store: DataStore | None = None
