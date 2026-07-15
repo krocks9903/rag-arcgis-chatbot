@@ -125,7 +125,7 @@ def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, 
         if verdict in {"incorrect", "ambiguous"} and i < CRAG_MAX_ITERS - 1:
             query = rewrite_query(query)
             meta["rewrites"].append(query)
-    meta["best_score"] = round(best_score(hits), 4)
+    meta["best_score"] = float(round(best_score(hits), 4))
     meta["retrieved"] = len(hits)
     return format_docs(hits), meta
 

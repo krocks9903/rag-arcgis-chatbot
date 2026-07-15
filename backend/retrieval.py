@@ -72,13 +72,10 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
     reranker = get_reranker()
     pairs = [(query, d.page_content) for d in candidates]
     scores = reranker.predict(pairs)
-    ranked = sorted(zip(candidates, scores), key=lambda x: -float(x[1]))
-    filtered = [(d, float(s)) for d, s in ranked if float(s) >= SCORE_THRESHOLD]
-    if not filtered:
-        filtered = ranked[:RERANK_K]
-    else:
-        filtered = filtered[:RERANK_K]
-    return filtered
+    # Always coerce to Python float — numpy.float32 is not JSON-serializable.
+    ranked = [(d, float(s)) for d, s in sorted(zip(candidates, scores), key=lambda x: -float(x[1]))]
+    filtered = [(d, s) for d, s in ranked if s >= SCORE_THRESHOLD]
+    return (filtered or ranked)[:RERANK_K]
 
 
 def format_docs(hits: list[tuple[Document, float]]) -> str:
@@ -88,7 +85,7 @@ def format_docs(hits: list[tuple[Document, float]]) -> str:
 
 
 def best_score(hits: list[tuple[Document, float]]) -> float:
-    return max((s for _, s in hits), default=0.0)
+    return float(max((float(s) for _, s in hits), default=0.0))
 
 
 def hits_meta(hits: list[tuple[Document, float]]) -> dict[str, Any]:

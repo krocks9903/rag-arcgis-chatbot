@@ -88,4 +88,11 @@ def stream_answer(question: str) -> Iterator[str]:
 
 
 def _sse(payload: dict[str, Any]) -> str:
-    return f"data: {json.dumps(payload)}\n\n"
+    return f"data: {json.dumps(payload, default=_json_default)}\n\n"
+
+
+def _json_default(obj: Any) -> Any:
+    """Serialize numpy scalars (and similar) that sneaks into response meta."""
+    if hasattr(obj, "item"):
+        return obj.item()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
