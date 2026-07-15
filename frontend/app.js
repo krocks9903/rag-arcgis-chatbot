@@ -22,27 +22,77 @@ async function refreshRecordCount() {
 
 refreshRecordCount();
 
-require(["esri/WebMap","esri/views/MapView","esri/widgets/Home","esri/widgets/Zoom","esri/widgets/Search"],
-function(WebMap, MapView, Home, Zoom, Search) {
-  const webmap = new WebMap({ portalItem: { id: "93eef5bd592f48b4a04e20815dba13b6" } });
-  const view = new MapView({ container: "viewDiv", map: webmap, ui: { components: [] } });
-  view.ui.add(new Zoom({ view }), "top-left");
-  view.ui.add(new Home({ view }), "top-left");
-  view.ui.add(new Search({ view }), "top-right");
-  window._mapView = view;
-  webmap.when(() => {
-    const el = document.getElementById("record-count");
-    if (el.textContent !== "Live data · loading…") return;
-    let total = 0;
-    const qs = webmap.layers.toArray().filter(l=>l.type==="feature")
-      .map(l=>l.load().then(()=>l.queryFeatureCount().then(n=>{total+=n;})));
-    Promise.all(qs).then(()=>{
-      el.textContent=`Live data · ${total} map features`;
-    }).catch(()=>{
-      el.textContent="Live data · connected";
-    });
-  });
-});
+const WEBMAP_ID = "93eef5bd592f48b4a04e20815dba13b6";
+const WEBMAP_OPEN_URL = `https://www.arcgis.com/apps/mapviewer/index.html?webmap=${WEBMAP_ID}`;
+
+function showMapFallback(message) {
+  const el = document.getElementById("map-fallback");
+  if (!el) return;
+  el.classList.add("visible");
+  el.innerHTML = `${message}<br><a href="${WEBMAP_OPEN_URL}" target="_blank" rel="noopener">Open map in ArcGIS ↗</a>`;
+}
+
+function initMap() {
+  if (typeof require !== "function") {
+    showMapFallback("ArcGIS API did not load (blocked network or ad blocker).");
+    return;
+  }
+  require(
+    ["esri/WebMap", "esri/views/MapView", "esri/widgets/Home", "esri/widgets/Zoom", "esri/widgets/Search"],
+    function (WebMap, MapView, Home, Zoom, Search) {
+      const fallback = document.getElementById("map-fallback");
+      const webmap = new WebMap({ portalItem: { id: WEBMAP_ID } });
+      const view = new MapView({
+        container: "viewDiv",
+        map: webmap,
+        ui: { components: [] },
+      });
+      view.ui.add(new Zoom({ view }), "top-left");
+      view.ui.add(new Home({ view }), "top-left");
+      view.ui.add(new Search({ view }), "top-right");
+      window._mapView = view;
+
+      view.when(() => {
+        if (fallback) fallback.classList.remove("visible");
+        // Layout can settle after flex/grid paint — force a resize.
+        setTimeout(() => view.resize(), 50);
+        setTimeout(() => view.resize(), 300);
+      }).catch((err) => {
+        console.error("MapView failed:", err);
+        showMapFallback("Map view failed to start.");
+      });
+
+      webmap.when(() => {
+        const el = document.getElementById("record-count");
+        if (el && el.textContent === "Live data · loading…") {
+          let total = 0;
+          const qs = webmap.layers
+            .toArray()
+            .filter((l) => l.type === "feature")
+            .map((l) =>
+              l.load().then(() => l.queryFeatureCount().then((n) => { total += n; }))
+            );
+          Promise.all(qs)
+            .then(() => { el.textContent = `Live data · ${total} map features`; })
+            .catch(() => { el.textContent = "Live data · connected"; });
+        }
+      }).catch((err) => {
+        console.error("WebMap failed:", err);
+        showMapFallback("Could not load the Estero web map.");
+      });
+    },
+    function (err) {
+      console.error("ArcGIS modules failed to load:", err);
+      showMapFallback("ArcGIS map modules failed to load.");
+    }
+  );
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initMap);
+} else {
+  initMap();
+}
 
 const messagesEl = document.getElementById("messages");
 const heroEl     = document.getElementById("hero");
@@ -497,4 +547,8 @@ function expandMap(e) {
   document.getElementById("expand-btn").textContent = expanded ? "⤢ Expand" : "⤡ Collapse";
   if (window._mapView) setTimeout(()=>window._mapView.resize(),300);
 }
-function toggleMobileMap() { document.getElementById("map-panel").classList.toggle("mobile-show"); }
+function toggleMobileMap() {
+  const panel = document.getElementById("map-panel");
+  panel.classList.toggle("mobile-show");
+  if (window._mapView) setTimeout(() => window._mapView.resize(), 100);
+}
