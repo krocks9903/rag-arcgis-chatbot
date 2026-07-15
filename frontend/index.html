@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ask Engage Estero — Planning & Zoning Decisions</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260715b" />
   <link rel="preload" as="image" href="assets/hero.webp" type="image/webp" />
 </head>
 <body>
@@ -19,7 +19,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:10px;">
     <div id="live-badge"><div id="live-dot"></div><span id="record-count">Live data · loading…</span></div>
-    <button id="mobile-map-toggle" class="map-btn" onclick="toggleMobileMap()">🗺 Map</button>
+    <button type="button" id="mobile-map-toggle" class="map-btn" onclick="toggleMobileMap()">🗺 Map</button>
   </div>
 </header>
 
@@ -32,10 +32,10 @@
       <h2>Understand Estero's decisions.</h2>
       <p>Ask anything about Planning, Zoning &amp; Design Board meetings — projects, votes, locations, and dates.</p>
       <div id="chips">
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">📅</div><span>What was approved in 2023?</span></div>
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">📍</div><span>What's happening on Corkscrew Road?</span></div>
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">🏢</div><span>Show me rezoning requests</span></div>
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">✏️</div><span>What did the board decide about RiverCreek?</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">📅</div><span>What was approved in 2023?</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">📍</div><span>What's happening on Corkscrew Road?</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">🏢</div><span>Show me rezoning requests</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">✏️</div><span>What did the board decide about RiverCreek?</span></div>
       </div>
       </div><!-- /hero-content -->
     </div>
@@ -44,8 +44,8 @@
 
     <div id="input-bar">
       <div id="input-wrap">
-        <textarea id="question" rows="1" placeholder="Ask about a project, location, year, or decision…" oninput="autoResize(this)"></textarea>
-        <button type="button" id="send-btn" title="Send">
+        <textarea id="question" rows="1" placeholder="Ask about a project, location, year, or decision…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button type="button" id="send-btn" onclick="sendMessage()" title="Send">
           <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
         </button>
       </div>
@@ -71,7 +71,7 @@
     <div id="map-footer"><div id="map-footer-dot"></div>Powered by Esri · ArcGIS Online</div>
   </section>
 </div>
-  <script src="config.js" defer></script>
-  <script src="app.js?v=20260715" defer></script>
+  <script src="config.js?v=20260715b"></script>
+  <script src="app.js?v=20260715b"></script>
 </body>
 </html>

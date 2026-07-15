@@ -540,18 +540,21 @@ async function sendMessage(overrideText) {
   setSending(true);
   showTyping();
   try {
-    // Prefer streaming so tokens appear during retrieval + generation.
+    // Prefer non-streaming /chat — Cloud Run often buffers SSE so stream hangs
+    // and used to leave the UI stuck with a disabled input.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    let res;
     try {
-      const streamed = await tryStreamChat(q);
-      if (streamed) return;
-    } catch (streamErr) {
-      console.warn("Stream failed, falling back to /chat:", streamErr);
+      res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
     }
-    const res = await fetch(`${API_BASE}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q }),
-    });
     if (res.ok) {
       const data = await res.json();
       removeTyping();
@@ -561,6 +564,14 @@ async function sendMessage(overrideText) {
       }
       appendMsg("bot", "I received an empty response from the backend. Please try again.");
       return;
+    }
+    // Fall back to stream only if /chat failed.
+    console.warn("/chat failed with", res.status, "— trying stream");
+    try {
+      const streamed = await tryStreamChat(q);
+      if (streamed) return;
+    } catch (streamErr) {
+      console.warn("Stream failed:", streamErr);
     }
     const err = await res.json().catch(() => ({}));
     removeTyping();

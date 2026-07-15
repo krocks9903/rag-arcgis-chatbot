@@ -96,13 +96,15 @@ app.add_middleware(
 
 
 class StaticCacheMiddleware(BaseHTTPMiddleware):
-    """Long-cache hashed/static frontend assets."""
+    """Cache fingerprinted assets only — never long-cache app.js/index (breaks Enter/send on deploy)."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         path = request.url.path
-        if path.startswith("/assets/") or path.endswith((".css", ".js", ".png", ".webp", ".jpg", ".svg")):
-            response.headers.setdefault("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+        if path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
+        elif path.endswith((".js", ".css", ".html")) or path in {"", "/"}:
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
 
 
