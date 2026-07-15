@@ -9,9 +9,17 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from keyword_path import answer_keyword
+from keyword_path import answer_keyword, is_strong_keyword_hit
 from models import ChatResponse, RouteKind
-from rag_path import answer_rag, parse_structured_answer, retrieve_with_crag, stream_llm_tokens
+from rag_path import (
+    answer_rag,
+    choose_llm_tier,
+    invoke_llm,
+    parse_structured_answer,
+    retrieve_with_crag,
+    should_escalate,
+    stream_llm_tokens,
+)
 from router import route_question
 from store import get_store
 from structured_path import answer_structured
@@ -32,6 +40,16 @@ def _dedupe_projects(projects: list) -> list:
     return out
 
 
+def _try_keyword_shortcut(store, question: str) -> ChatResponse | None:
+    """Skip LLM when keyword/lookup match is tight enough."""
+    kw = answer_keyword(store.dataframe, question)
+    if is_strong_keyword_hit(kw, question):
+        kw.meta["llm_skipped"] = True
+        kw.meta["paths"] = ["keyword"]
+        return kw
+    return None
+
+
 def answer_question(question: str) -> ChatResponse:
     store = get_store()
     if store is None or not store.is_ready():
@@ -42,21 +60,34 @@ def answer_question(question: str) -> ChatResponse:
     with trace_span("answer_question", {"route": route.value, "question": question[:120]}):
         if route == RouteKind.STRUCTURED:
             result = answer_structured(store.dataframe, question)
-        elif route == RouteKind.KEYWORD:
-            result = answer_keyword(store.dataframe, question)
-        elif route == RouteKind.MIXED:
-            kw = answer_keyword(store.dataframe, question)
-            if kw.projects:
-                kw.route = RouteKind.MIXED.value
-                kw.meta["paths"] = ["keyword"]
-                result = kw
+        else:
+            # Fast path: tight keyword hits never pay for Groq.
+            shortcut = _try_keyword_shortcut(store, question)
+            if shortcut is not None:
+                if route == RouteKind.MIXED:
+                    shortcut.route = RouteKind.MIXED.value
+                result = shortcut
+            elif route == RouteKind.KEYWORD:
+                result = answer_keyword(store.dataframe, question)
+            elif route == RouteKind.MIXED:
+                kw = answer_keyword(store.dataframe, question)
+                if kw.projects:
+                    kw.route = RouteKind.MIXED.value
+                    kw.meta["paths"] = ["keyword"]
+                    result = kw
+                else:
+                    result = answer_rag(store, question)
             else:
                 result = answer_rag(store, question)
-        else:
-            result = answer_rag(store, question)
         total_ms = round((time.perf_counter() - t0) * 1000)
         result.meta["latency_ms"] = total_ms
-        logger.info("answer_question route=%s total_ms=%s", result.route, total_ms)
+        logger.info(
+            "answer_question route=%s llm_skipped=%s llm_tier=%s total_ms=%s",
+            result.route,
+            result.meta.get("llm_skipped"),
+            result.meta.get("llm_tier"),
+            total_ms,
+        )
         return result
 
 
@@ -76,6 +107,15 @@ def stream_answer(question: str) -> Iterator[str]:
         result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
         yield _sse({"type": "done", **result.model_dump()})
         return
+
+    shortcut = _try_keyword_shortcut(store, question)
+    if shortcut is not None:
+        if route == RouteKind.MIXED:
+            shortcut.route = RouteKind.MIXED.value
+        shortcut.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+        yield _sse({"type": "done", **shortcut.model_dump()})
+        return
+
     if route == RouteKind.KEYWORD:
         result = answer_keyword(store.dataframe, question)
         result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
@@ -93,12 +133,18 @@ def stream_answer(question: str) -> Iterator[str]:
     context, crag_meta = retrieve_with_crag(store, question)
     retrieve_ms = round((time.perf_counter() - t_retrieve) * 1000)
     crag_meta["retrieve_ms"] = retrieve_ms
-    yield _sse({"type": "meta", "route": RouteKind.RAG.value, **crag_meta})
+    tier = choose_llm_tier(question, crag_meta)
+    yield _sse({
+        "type": "meta",
+        "route": RouteKind.RAG.value,
+        "llm_tier": tier,
+        **crag_meta,
+    })
 
     buffer = ""
     t_gen = time.perf_counter()
     first_token_ms: int | None = None
-    for token in stream_llm_tokens(question, context):
+    for token in stream_llm_tokens(question, context, tier=tier):
         if first_token_ms is None:
             first_token_ms = round((time.perf_counter() - t0) * 1000)
         buffer += token
@@ -106,12 +152,27 @@ def stream_answer(question: str) -> Iterator[str]:
     generate_ms = round((time.perf_counter() - t_gen) * 1000)
 
     result = parse_structured_answer(buffer, route=RouteKind.RAG.value)
+    result.meta["llm_tier"] = tier
+    if tier == "fast" and should_escalate(result, crag_meta):
+        logger.info("Stream escalate: regenerating with strong model")
+        # Replace weak fast answer with a strong one (no mid-stream UI flicker for most cases).
+        strong = invoke_llm(question, context, "strong", RouteKind.RAG.value)
+        strong.meta.update(crag_meta)
+        strong.meta["retrieve_ms"] = retrieve_ms
+        strong.meta["generate_ms"] = round((time.perf_counter() - t_gen) * 1000)
+        strong.meta["ttft_ms"] = first_token_ms
+        strong.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+        strong.meta["escalated_from"] = "fast"
+        yield _sse({"type": "done", **strong.model_dump()})
+        return
+
     result.meta.update(crag_meta)
     result.meta["generate_ms"] = generate_ms
     result.meta["ttft_ms"] = first_token_ms
     result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
     logger.info(
-        "stream_answer route=rag retrieve_ms=%s generate_ms=%s ttft_ms=%s total_ms=%s",
+        "stream_answer route=rag tier=%s retrieve_ms=%s generate_ms=%s ttft_ms=%s total_ms=%s",
+        tier,
         retrieve_ms,
         generate_ms,
         first_token_ms,

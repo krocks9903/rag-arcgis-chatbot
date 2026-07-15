@@ -27,14 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 def _warm_models() -> dict[str, bool]:
-    """Load reranker + LLM and run one retrieve so the first user question is warm."""
+    """Load reranker + LLMs and run one retrieve so the first user question is warm."""
     from rag_path import get_llm
     from retrieval import get_reranker, hybrid_retrieve
 
     store = get_store()
     ready = store is not None and store.is_ready()
     reranker_ok = False
-    llm_ok = False
+    llm_fast_ok = False
+    llm_strong_ok = False
     retrieve_ok = False
     if ready:
         get_reranker()
@@ -42,14 +43,21 @@ def _warm_models() -> dict[str, bool]:
         hybrid_retrieve(store, "Estero planning zoning")
         retrieve_ok = True
         try:
-            get_llm()
-            llm_ok = True
+            get_llm("fast")
+            llm_fast_ok = True
         except Exception as e:
-            logger.warning("LLM warmup skipped: %s", e)
+            logger.warning("Fast LLM warmup skipped: %s", e)
+        try:
+            get_llm("strong")
+            llm_strong_ok = True
+        except Exception as e:
+            logger.warning("Strong LLM warmup skipped: %s", e)
     return {
         "chain_ready": ready,
         "reranker": reranker_ok,
-        "llm": llm_ok,
+        "llm": llm_fast_ok or llm_strong_ok,
+        "llm_fast": llm_fast_ok,
+        "llm_strong": llm_strong_ok,
         "retrieve": retrieve_ok,
     }
 

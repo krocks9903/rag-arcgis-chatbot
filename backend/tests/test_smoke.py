@@ -48,3 +48,29 @@ def test_parse_structured_answer_strips_markdown_fence():
     result = parse_structured_answer(raw)
     assert result.summary == "No match."
     assert result.projects == []
+    assert result.meta.get("parse_ok") is True
+
+
+def test_choose_llm_tier_prefers_gemini_when_key_present(monkeypatch):
+    from rag_path import choose_llm_tier
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    assert choose_llm_tier("Explain what happened with RiverCreek") == "fast"
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    assert choose_llm_tier("Corkscrew Road projects") == "strong"
+
+
+def test_keyword_shortcut_for_app_id():
+    from keyword_path import is_strong_keyword_hit
+    from models import ChatResponse, ProjectOut
+
+    hit = ChatResponse(
+        summary="Found 1 record.",
+        projects=[ProjectOut(title="Wawa", id="DOS2022-E016")],
+        answer="Found 1 record.",
+        meta={"matched_rows": 1},
+    )
+    assert is_strong_keyword_hit(hit, "DOS2022-E016")
+    miss = ChatResponse(summary="none", projects=[], answer="none", meta={"matched_rows": 0})
+    assert not is_strong_keyword_hit(miss, "Corkscrew Road")

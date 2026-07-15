@@ -18,6 +18,7 @@ huggingface-hub==0.23.4
 
 # Groq and HuggingFace integrations
 langchain-groq>=0.1.0
+langchain-google-genai==1.0.10
 langchain-huggingface>=0.0.2
 
 # Data
