@@ -51,14 +51,14 @@ def test_parse_structured_answer_strips_markdown_fence():
     assert result.meta.get("parse_ok") is True
 
 
-def test_choose_llm_tier_prefers_gemini_when_key_present(monkeypatch):
+def test_choose_llm_tier_collaborate_when_both_keys(monkeypatch):
     from rag_path import choose_llm_tier
 
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    assert choose_llm_tier("Explain what happened with RiverCreek") == "fast"
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    assert choose_llm_tier("Corkscrew Road projects") == "strong"
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("GROQ_API_KEY", "q")
+    assert choose_llm_tier("Explain RiverCreek") == "collaborate"
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    assert choose_llm_tier("Corkscrew Road") == "gemini"
 
 
 def test_keyword_shortcut_for_app_id():

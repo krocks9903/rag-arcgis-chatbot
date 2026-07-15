@@ -9,16 +9,19 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from config import ENABLE_LLM_COLLABORATE, GEMINI_MODEL, GROQ_MODEL
 from keyword_path import answer_keyword, is_strong_keyword_hit
 from models import ChatResponse, RouteKind
 from rag_path import (
     answer_rag,
     choose_llm_tier,
-    invoke_llm,
-    parse_structured_answer,
+    gemini_available,
+    gemini_extract_projects,
+    generate_answer,
+    groq_available,
+    groq_write_summary,
     retrieve_with_crag,
-    should_escalate,
-    stream_llm_tokens,
+    stream_groq_summary,
 )
 from router import route_question
 from store import get_store
@@ -61,7 +64,6 @@ def answer_question(question: str) -> ChatResponse:
         if route == RouteKind.STRUCTURED:
             result = answer_structured(store.dataframe, question)
         else:
-            # Fast path: tight keyword hits never pay for Groq.
             shortcut = _try_keyword_shortcut(store, question)
             if shortcut is not None:
                 if route == RouteKind.MIXED:
@@ -82,17 +84,16 @@ def answer_question(question: str) -> ChatResponse:
         total_ms = round((time.perf_counter() - t0) * 1000)
         result.meta["latency_ms"] = total_ms
         logger.info(
-            "answer_question route=%s llm_skipped=%s llm_tier=%s total_ms=%s",
+            "answer_question route=%s mode=%s total_ms=%s",
             result.route,
-            result.meta.get("llm_skipped"),
-            result.meta.get("llm_tier"),
+            result.meta.get("llm_mode") or result.meta.get("paths"),
             total_ms,
         )
         return result
 
 
 def stream_answer(question: str) -> Iterator[str]:
-    """SSE events: meta → tokens (RAG only) → done."""
+    """SSE: meta → (collaborate: extract then summary tokens) → done."""
     store = get_store()
     if store is None or not store.is_ready():
         yield _sse({"type": "error", "detail": "No dataset loaded"})
@@ -133,51 +134,75 @@ def stream_answer(question: str) -> Iterator[str]:
     context, crag_meta = retrieve_with_crag(store, question)
     retrieve_ms = round((time.perf_counter() - t_retrieve) * 1000)
     crag_meta["retrieve_ms"] = retrieve_ms
-    tier = choose_llm_tier(question, crag_meta)
+
+    use_collab = (
+        gemini_available()
+        and groq_available()
+        and ENABLE_LLM_COLLABORATE
+    )
+    mode = choose_llm_tier(question, crag_meta)
     yield _sse({
         "type": "meta",
         "route": RouteKind.RAG.value,
-        "llm_tier": tier,
+        "llm_mode": mode,
         **crag_meta,
     })
 
-    buffer = ""
     t_gen = time.perf_counter()
     first_token_ms: int | None = None
-    for token in stream_llm_tokens(question, context, tier=tier):
-        if first_token_ms is None:
-            first_token_ms = round((time.perf_counter() - t0) * 1000)
-        buffer += token
-        yield _sse({"type": "token", "text": token})
-    generate_ms = round((time.perf_counter() - t_gen) * 1000)
 
-    result = parse_structured_answer(buffer, route=RouteKind.RAG.value)
-    result.meta["llm_tier"] = tier
-    if tier == "fast" and should_escalate(result, crag_meta):
-        logger.info("Stream escalate: regenerating with strong model")
-        # Replace weak fast answer with a strong one (no mid-stream UI flicker for most cases).
-        strong = invoke_llm(question, context, "strong", RouteKind.RAG.value)
-        strong.meta.update(crag_meta)
-        strong.meta["retrieve_ms"] = retrieve_ms
-        strong.meta["generate_ms"] = round((time.perf_counter() - t_gen) * 1000)
-        strong.meta["ttft_ms"] = first_token_ms
-        strong.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
-        strong.meta["escalated_from"] = "fast"
-        yield _sse({"type": "done", **strong.model_dump()})
-        return
+    if use_collab:
+        try:
+            yield _sse({"type": "meta", "phase": "extract", "provider": "gemini", "model": GEMINI_MODEL})
+            t_ex = time.perf_counter()
+            projects = gemini_extract_projects(question, context)
+            extract_ms = round((time.perf_counter() - t_ex) * 1000)
 
+            yield _sse({"type": "meta", "phase": "summary", "provider": "groq", "model": GROQ_MODEL})
+            buffer = ""
+            t_sum = time.perf_counter()
+            for token in stream_groq_summary(question, projects):
+                if first_token_ms is None:
+                    first_token_ms = round((time.perf_counter() - t0) * 1000)
+                buffer += token
+                yield _sse({"type": "token", "text": token})
+            summary = buffer.strip().strip('"').strip() or groq_write_summary(question, projects)
+            summary_ms = round((time.perf_counter() - t_sum) * 1000)
+
+            result = ChatResponse(
+                summary=summary,
+                projects=projects,
+                answer=summary,
+                route=RouteKind.RAG.value,
+                meta={
+                    **crag_meta,
+                    "parse_ok": True,
+                    "llm_mode": "collaborate",
+                    "llm_providers": ["gemini", "groq"],
+                    "llm_models": {"extract": GEMINI_MODEL, "summary": GROQ_MODEL},
+                    "extract_ms": extract_ms,
+                    "summary_ms": summary_ms,
+                    "generate_ms": round((time.perf_counter() - t_gen) * 1000),
+                    "ttft_ms": first_token_ms,
+                    "latency_ms": round((time.perf_counter() - t0) * 1000),
+                },
+            )
+            yield _sse({"type": "done", **result.model_dump()})
+            return
+        except Exception as e:
+            logger.warning("Collaborate stream failed (%s); solo fallback", e)
+
+    # Solo fallback: generate full answer (optional token stream from one provider).
+    result = generate_answer(question, context, crag_meta=crag_meta)
+    # If we already have a complete result, stream the summary as tokens for UX.
+    summary = result.summary or result.answer or ""
+    if summary and first_token_ms is None:
+        first_token_ms = round((time.perf_counter() - t0) * 1000)
+        yield _sse({"type": "token", "text": summary})
     result.meta.update(crag_meta)
-    result.meta["generate_ms"] = generate_ms
+    result.meta["generate_ms"] = round((time.perf_counter() - t_gen) * 1000)
     result.meta["ttft_ms"] = first_token_ms
     result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
-    logger.info(
-        "stream_answer route=rag tier=%s retrieve_ms=%s generate_ms=%s ttft_ms=%s total_ms=%s",
-        tier,
-        retrieve_ms,
-        generate_ms,
-        first_token_ms,
-        result.meta["latency_ms"],
-    )
     yield _sse({"type": "done", **result.model_dump()})
 
 
@@ -186,7 +211,6 @@ def _sse(payload: dict[str, Any]) -> str:
 
 
 def _json_default(obj: Any) -> Any:
-    """Serialize numpy scalars (and similar) that sneaks into response meta."""
     if hasattr(obj, "item"):
         return obj.item()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")

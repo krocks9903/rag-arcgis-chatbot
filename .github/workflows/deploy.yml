@@ -66,7 +66,7 @@ jobs:
             --timeout 300 \
             --cpu-boost \
             --startup-probe=initialDelaySeconds=0,timeoutSeconds=10,periodSeconds=10,failureThreshold=30,httpGet.port=8080,httpGet.path=/ready \
-            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},SERVE_FRONTEND=true,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,GEMINI_MODEL=gemini-2.5-flash,GROQ_MODEL=llama-3.1-8b-instant,CRAG_MAX_ITERS=1,RERANK_CANDIDATES=4,DENSE_K=12,SPARSE_K=12,ENABLE_KEYWORD_SHORTCUT=true,ENABLE_LLM_ESCALATE=true,KEYWORD_FAST_MAX_ROWS=6"
+            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},SERVE_FRONTEND=true,EMBEDDING_MODEL=BAAI/bge-small-en-v1.5,RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2,GEMINI_MODEL=gemini-2.5-flash,GROQ_MODEL=llama-3.1-8b-instant,ENABLE_LLM_COLLABORATE=true,CRAG_MAX_ITERS=1,RERANK_CANDIDATES=4,DENSE_K=12,SPARSE_K=12,ENABLE_KEYWORD_SHORTCUT=true,KEYWORD_FAST_MAX_ROWS=6"
 
       - name: Warm service after deploy
         run: |

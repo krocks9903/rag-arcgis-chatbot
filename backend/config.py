@@ -17,13 +17,14 @@ DEFAULT_CSV_PATH = os.getenv("CSV_PATH", GOLD_CSV_PATH)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 # MiniLM cross-encoder is ~5–10× faster on Cloud Run CPU than bge-reranker-base.
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-# Primary answer LLM (Gemini = separate free quota + usually lower latency than Groq for this JSON task).
+# Primary: Gemini extracts project facts. Groq writes the citizen summary (collaborate).
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-# Fallback / escalate when Gemini fails JSON or is unavailable.
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+ENABLE_LLM_COLLABORATE = os.getenv("ENABLE_LLM_COLLABORATE", "true").lower() not in {"0", "false", "no"}
 # Skip LLM when keyword lookup returns a tight hit (app ID or ≤ N rows).
 KEYWORD_FAST_MAX_ROWS = int(os.getenv("KEYWORD_FAST_MAX_ROWS", "6"))
 ENABLE_KEYWORD_SHORTCUT = os.getenv("ENABLE_KEYWORD_SHORTCUT", "true").lower() not in {"0", "false", "no"}
+# Legacy name; collaborate path supersedes Gemini→Groq escalate.
 ENABLE_LLM_ESCALATE = os.getenv("ENABLE_LLM_ESCALATE", "true").lower() not in {"0", "false", "no"}
 
 DENSE_K = int(os.getenv("DENSE_K", "12"))
