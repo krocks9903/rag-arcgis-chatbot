@@ -419,7 +419,8 @@ function removeTyping() {
 function setSending(busy) {
   const btn = document.getElementById("send-btn");
   if (btn) btn.disabled = !!busy;
-  if (questionEl) questionEl.disabled = !!busy;
+  // Keep the textarea enabled so Enter still works if a request hangs.
+  if (questionEl) questionEl.readOnly = !!busy;
 }
 
 function parseSseFrames(buffer, onPayload) {
@@ -442,89 +443,102 @@ function parseSseFrames(buffer, onPayload) {
 }
 
 async function tryStreamChat(question) {
-  const res = await fetch(`${API_BASE}/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
-  });
-  if (!res.ok || !res.body) return false;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+  try {
+    const res = await fetch(`${API_BASE}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) return false;
 
-  removeTyping();
-  const row = document.createElement("div");
-  row.className = "msg-row";
-  const botDiv = document.createElement("div");
-  botDiv.className = "msg-bot";
-  const avatar = document.createElement("div");
-  avatar.className = "bot-avatar";
-  avatar.textContent = "🏛";
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  const proseEl = document.createElement("div");
-  bubble.appendChild(proseEl);
-  botDiv.appendChild(avatar);
-  botDiv.appendChild(bubble);
-  row.appendChild(botDiv);
-  messagesEl.appendChild(row);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+    removeTyping();
+    const row = document.createElement("div");
+    row.className = "msg-row";
+    const botDiv = document.createElement("div");
+    botDiv.className = "msg-bot";
+    const avatar = document.createElement("div");
+    avatar.className = "bot-avatar";
+    avatar.textContent = "🏛";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const proseEl = document.createElement("div");
+    bubble.appendChild(proseEl);
+    botDiv.appendChild(avatar);
+    botDiv.appendChild(bubble);
+    row.appendChild(botDiv);
+    messagesEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let donePayload = null;
-  let sawError = false;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let donePayload = null;
+    let sawError = false;
 
-  const handlePayload = (payload) => {
-    if (payload.type === "token" && payload.text) {
-      proseEl.textContent += payload.text;
+    const handlePayload = (payload) => {
+      if (payload.type === "token" && payload.text) {
+        proseEl.textContent += payload.text;
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } else if (payload.type === "done") {
+        donePayload = payload;
+      } else if (payload.type === "error") {
+        sawError = true;
+        proseEl.textContent = "⚠️ " + (payload.detail || "Stream error");
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = parseSseFrames(buffer, handlePayload);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      parseSseFrames(buffer + "\n\n", handlePayload);
+    }
+
+    if (donePayload) {
+      const projects = (donePayload.projects || []).map(normalizeProject);
+      const summary = (donePayload.summary || donePayload.answer || "").trim();
+      if (summary && !proseEl.textContent.trim()) {
+        proseEl.innerHTML = summary.replace(/\n/g, "<br>");
+      }
+      projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
+      if (!proseEl.textContent.trim() && projects.length === 0) {
+        proseEl.textContent = "Sorry, I couldn't find an answer.";
+      }
       messagesEl.scrollTop = messagesEl.scrollHeight;
-    } else if (payload.type === "done") {
-      donePayload = payload;
-    } else if (payload.type === "error") {
-      sawError = true;
-      proseEl.textContent = "⚠️ " + (payload.detail || "Stream error");
+      return true;
     }
-  };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    buffer = parseSseFrames(buffer, handlePayload);
-  }
-  buffer += decoder.decode();
-  if (buffer.trim()) {
-    parseSseFrames(buffer + "\n\n", handlePayload);
-  }
-
-  if (donePayload) {
-    const projects = (donePayload.projects || []).map(normalizeProject);
-    const summary = (donePayload.summary || donePayload.answer || "").trim();
-    if (summary && !proseEl.textContent.trim()) {
-      proseEl.innerHTML = summary.replace(/\n/g, "<br>");
-    }
-    projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
-    if (!proseEl.textContent.trim() && projects.length === 0) {
-      proseEl.textContent = "Sorry, I couldn't find an answer.";
+    // Stream opened but produced no usable done event — remove empty bubble
+    // and let sendMessage fall back to POST /chat.
+    if (!sawError && !proseEl.textContent.trim()) {
+      row.remove();
+      return false;
     }
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return true;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  // Stream opened but produced no usable done event — remove empty bubble
-  // and let sendMessage fall back to POST /chat.
-  if (!sawError && !proseEl.textContent.trim()) {
-    row.remove();
-    return false;
-  }
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return true;
 }
 
+let _sending = false;
 async function sendMessage(overrideText) {
-  const q = (overrideText || questionEl.value).trim();
+  if (_sending) return;
+  const q = (overrideText || (questionEl && questionEl.value) || "").trim();
   if (!q) return;
-  startChat(); questionEl.value=""; autoResize(questionEl);
-  appendMsg("user", q); setSending(true); showTyping();
+  startChat();
+  if (questionEl) { questionEl.value = ""; autoResize(questionEl); }
+  appendMsg("user", q);
+  _sending = true;
+  setSending(true);
+  showTyping();
   try {
     // Prefer streaming so tokens appear during retrieval + generation.
     try {
@@ -556,12 +570,18 @@ async function sendMessage(overrideText) {
     console.error("Fetch error:", e);
     appendMsg("bot", `⚠️ Could not reach the backend at ${API_BASE}. The request may have timed out — try a more specific question (e.g. an Application ID).`);
   } finally {
+    _sending = false;
     setSending(false);
   }
 }
 
 function sendChip(el) { sendMessage(el.querySelector("span").textContent); }
-function handleKey(e) { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} }
+function handleKey(e) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
 function autoResize(el) { el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,100)+"px"; }
 function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
@@ -617,3 +637,18 @@ function toggleMobileMap() {
   if (panel.classList.contains("mobile-show")) initMap();
   if (window._mapView) setTimeout(() => window._mapView.resize(), 100);
 }
+
+// Wire controls in JS so Enter/Send work even if inline handlers are blocked.
+(function wireChatControls() {
+  const q = document.getElementById("question");
+  const btn = document.getElementById("send-btn");
+  if (q) q.addEventListener("keydown", handleKey);
+  if (btn) btn.addEventListener("click", () => sendMessage());
+  window.sendMessage = sendMessage;
+  window.sendChip = sendChip;
+  window.handleKey = handleKey;
+  window.autoResize = autoResize;
+  window.toggleMobileMap = toggleMobileMap;
+  window.expandMap = expandMap;
+  window.panAndDirect = panAndDirect;
+})();
