@@ -306,16 +306,23 @@ function renderProjectCard(p) {
 }
 
 function formatProse(proseEl, prose) {
+  const text = String(prose || "").trim();
   try {
+    // Prefer native bullet rendering for "- item" summaries.
+    if (/^[-*•]\s+/m.test(text)) {
+      const items = text.split(/\n+/).map((l) => l.replace(/^[-*•]\s+/, "").trim()).filter(Boolean);
+      proseEl.innerHTML = "<ul>" + items.map((i) => `<li>${escHtml(i)}</li>`).join("") + "</ul>";
+      return;
+    }
     if (typeof marked !== "undefined" && marked.parse) {
-      proseEl.innerHTML = marked.parse(prose);
+      proseEl.innerHTML = marked.parse(text);
     } else if (typeof marked !== "undefined" && typeof marked === "function") {
-      proseEl.innerHTML = marked(prose);
+      proseEl.innerHTML = marked(text);
     } else {
-      proseEl.innerHTML = prose.replace(/\n/g, "<br>");
+      proseEl.innerHTML = escHtml(text).replace(/\n/g, "<br>");
     }
   } catch (e) {
-    proseEl.innerHTML = prose.replace(/\n/g, "<br>");
+    proseEl.innerHTML = escHtml(text).replace(/\n/g, "<br>");
   }
 }
 
@@ -334,7 +341,8 @@ function appendBotResponse(data) {
   bubble.className = "bubble";
   if (prose) {
     const proseEl = document.createElement("div");
-    proseEl.innerHTML = prose.replace(/\n/g, "<br>");
+    proseEl.className = "bot-prose";
+    formatProse(proseEl, prose);
     bubble.appendChild(proseEl);
     ensureMarked().then(() => formatProse(proseEl, prose));
   }
@@ -504,11 +512,11 @@ async function tryStreamChat(question) {
     if (donePayload) {
       const projects = (donePayload.projects || []).map(normalizeProject);
       const summary = (donePayload.summary || donePayload.answer || "").trim();
-      if (summary && !proseEl.textContent.trim()) {
-        proseEl.innerHTML = summary.replace(/\n/g, "<br>");
+      if (summary) {
+        formatProse(proseEl, summary);
       }
       projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
-      if (!proseEl.textContent.trim() && projects.length === 0) {
+      if (!proseEl.textContent.trim() && !proseEl.querySelector("li") && projects.length === 0) {
         proseEl.textContent = "Sorry, I couldn't find an answer.";
       }
       messagesEl.scrollTop = messagesEl.scrollHeight;

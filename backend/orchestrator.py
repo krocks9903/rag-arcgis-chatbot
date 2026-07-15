@@ -16,6 +16,7 @@ from rag_path import (
     answer_rag,
     choose_llm_tier,
     finalize_prose,
+    format_summary_bullets,
     gemini_available,
     gemini_extract_projects,
     generate_answer,
@@ -146,7 +147,7 @@ def stream_answer(question: str) -> Iterator[str]:
                     first_token_ms = round((time.perf_counter() - t0) * 1000)
                 buffer += token
                 yield _sse({"type": "token", "text": token})
-            summary = finalize_prose(buffer) or groq_write_summary(question, projects)
+            summary = format_summary_bullets(buffer) or groq_write_summary(question, projects)
             projects = projects[:5]
             for p in projects:
                 p.summary = finalize_prose(p.summary)

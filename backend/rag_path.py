@@ -35,7 +35,7 @@ RULES — follow exactly:
 1. Only use facts from the Context. Never invent any detail.
 2. If no relevant info exists, set summary to exactly: "I don't have records on that." and projects to [].
 3. Write plain English. No markdown, no asterisks.
-4. The top-level "summary" must fully answer the resident's question in 2–4 complete sentences (end each with a period). Do not stop mid-thought.
+4. The top-level "summary" must answer the question as 2–5 markdown bullet points (each line starts with "- "). Every bullet must be a complete sentence ending with a period.
 5. For each matching project, fill every field from the Context only. Each project "summary" must be 1–2 complete sentences.
 6. document_url must be copied exactly from Document_Link in the context — never invent URLs.
 7. status must be one of: Approved, Denied, Continued, or No decision recorded.
@@ -43,7 +43,7 @@ RULES — follow exactly:
 
 Return ONLY valid JSON (no markdown fences) with this exact shape:
 {{
-  "summary": "2-4 complete sentences that answer the question",
+  "summary": "- First key point.\\n- Second key point.\\n- Third key point.",
   "projects": [
     {{
       "title": "short project name from ProjectName",
@@ -100,13 +100,14 @@ JSON:"""
 # Groq role: citizen-facing answer from Gemini's extracted projects.
 SUMMARY_TEMPLATE = """You write clear answers for Estero residents about Planning & Zoning decisions.
 
-Given the resident question and the verified project list, write a complete answer in 2–4 sentences.
+Given the resident question and the verified project list, write a bullet-point answer.
 Rules:
 - Directly answer the question using only these projects. Do not invent records.
 - If projects is empty, reply exactly: I don't have records on that.
-- Cover the main outcomes (what was approved, denied, continued, or discussed) and name key projects or locations when helpful.
-- Use complete sentences that end with a period. Never stop mid-word or mid-sentence.
-- No markdown, no JSON, no bullet lists — plain prose only.
+- Output 2–5 bullets. Each line MUST start with "- " (dash + space).
+- Each bullet is one complete sentence ending with a period. Never stop mid-word or mid-sentence.
+- Cover the main outcomes (approved, denied, continued, or discussed) and name key projects or locations when helpful.
+- No intro sentence, no closing sentence outside the bullets, no numbered lists, no JSON.
 
 Question: {question}
 
@@ -193,14 +194,46 @@ def finalize_prose(text: str) -> str:
         return text
     if text[-1] in ".!?":
         return text
-    # Prefer ending on the last completed sentence when a fragment trails after it.
     sentence_ends = [m.end() - 1 for m in re.finditer(r"[.!?](?=\s|$)", text)]
     if sentence_ends and sentence_ends[-1] >= 20:
-        # Keep through that punctuation (drop the unfinished tail).
         return text[: sentence_ends[-1] + 1].strip()
     if len(text.split()) >= 6:
         return text.rstrip(",;:- ") + "."
     return text
+
+
+def format_summary_bullets(text: str) -> str:
+    """Normalize a summary into markdown '- ' bullet lines."""
+    text = (text or "").strip().strip('"').strip("'").strip()
+    if not text:
+        return text
+    empty = "I don't have records on that."
+    if text.lower().rstrip(".") == empty.lower().rstrip("."):
+        return empty
+
+    bullets: list[str] = []
+    # Already bullet-ish
+    if re.search(r"(?m)^(?:[-*•]|\d+\.)\s+", text):
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^(?:[-*•]|\d+\.)\s+", "", line).strip()
+            line = finalize_prose(line)
+            if line:
+                bullets.append(f"- {line}")
+    else:
+        # Split prose into sentence bullets
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        for part in parts:
+            line = finalize_prose(part.strip())
+            if line:
+                bullets.append(f"- {line}")
+
+    if not bullets:
+        return empty
+    # Keep the answer scannable
+    return "\n".join(bullets[:6])
 
 
 def parse_structured_answer(raw: str, route: str = RouteKind.RAG.value) -> ChatResponse:
@@ -210,7 +243,7 @@ def parse_structured_answer(raw: str, route: str = RouteKind.RAG.value) -> ChatR
         for p in projects:
             p.summary = finalize_prose(p.summary)
             p.title = (p.title or "").strip()
-        summary = finalize_prose(str(payload.get("summary", "")).strip())
+        summary = format_summary_bullets(str(payload.get("summary", "")).strip())
         if not summary and not projects:
             summary = "I don't have records on that."
         result = ChatResponse(summary=summary, projects=projects[:5], answer=summary, route=route)
@@ -301,15 +334,14 @@ def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:
     prompt = PromptTemplate(template=SUMMARY_TEMPLATE, input_variables=["question", "projects_json"])
     chain = prompt | get_llm("groq") | StrOutputParser()
     text = chain.invoke({"question": question, "projects_json": projects_json})
-    text = finalize_prose(text)
+    text = format_summary_bullets(text)
     if not text:
         if projects:
-            titles = ", ".join(p.title for p in projects[:3] if p.title)
-            return finalize_prose(
-                f"Records show {len(projects)} related item{'s' if len(projects) != 1 else ''}"
-                + (f", including {titles}" if titles else "")
-                + "."
-            )
+            titles = [p.title for p in projects[:3] if p.title]
+            bullets = [f"- Related record: {t}." for t in titles] or [
+                f"- Records show {len(projects)} related item{'s' if len(projects) != 1 else ''}."
+            ]
+            return "\n".join(bullets)
         return "I don't have records on that."
     return text
 
