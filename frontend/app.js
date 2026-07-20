@@ -38,27 +38,86 @@ function startChat() {
   }
 }
 
+// ─────────────────────────────────────────────
+// Normalization: accepts board records AND articles
+// ─────────────────────────────────────────────
 function normalizeProject(p) {
-  return {
-    title: p.title || "",
-    id: p.id || "",
-    location: p.location || "",
-    summary: p.summary || "",
-    status: p.status || "No decision recorded",
-    date: p.date || "",
-    documentUrl: p.document_url || p.documentUrl || "",
+  if (!p || typeof p !== "object") return null;
+  const norm = {
+    sourceType: p.source_type || p.sourceType ||
+                ((p.article_url || p.articleUrl) ? "website_article" : "board_record"),
+    title: p.title || p.article_title || p.articleTitle || p.project_name || "",
+    location: nullsafe(p.location),
+    summary: nullsafe(p.summary),
+    id: nullsafe(p.id) || nullsafe(p.application_id),
+    status: nullsafe(p.status),
+    date: nullsafe(p.date) || nullsafe(p.meeting_date),
+    documentUrl: cleanUrl(p.document_url || p.documentUrl),
+    articleUrl: cleanUrl(p.article_url || p.articleUrl || p.url),
+    publishDate: nullsafe(p.publish_date) || nullsafe(p.publishDate),
+    category: nullsafe(p.category),
   };
+  // Must have at least something renderable
+  if (!norm.title && !norm.id && !norm.articleUrl && !norm.documentUrl) return null;
+  return norm;
 }
 
-// Legacy text-block parser (fallback when API returns plain answer string only)
+function nullsafe(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v).trim();
+  return (s.toLowerCase() === "null" || s.toLowerCase() === "none" || s === "") ? "" : s;
+}
+
+function cleanUrl(u) {
+  const s = nullsafe(u);
+  return s.startsWith("http") ? s : "";
+}
+
+// ─────────────────────────────────────────────
+// JSON block extraction (primary card path)
+// ─────────────────────────────────────────────
+function extractJsonCards(text) {
+  const cards = [];
+  const regex = /```json\s*([\s\S]*?)```/gi;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      if (Array.isArray(parsed)) {
+        parsed.forEach(p => { const n = normalizeProject(p); if (n) cards.push(n); });
+      } else {
+        const n = normalizeProject(parsed);
+        if (n) cards.push(n);
+      }
+    } catch (e) { /* malformed JSON — skip */ }
+  }
+  return cards;
+}
+
+// Remove JSON blocks + dangling lead-in sentences from prose
+function cleanProse(text) {
+  return text
+    .replace(/```json[\s\S]*?```/gi, "")
+    .replace(/```[\s\S]*?```/g, "")
+    // dangling lead-ins the model tends to write before a JSON block
+    .replace(/^.*(here'?s?|the) (is )?(the )?most relevant (item|project|json block|record)( is)?[:.]?\s*$/gim, "")
+    .replace(/^.*json (block|output|details?)[:.]?\s*$/gim, "")
+    .replace(/^\s*relevant details?[:.]?\s*$/gim, "")
+    // collapse 3+ newlines
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ─────────────────────────────────────────────
+// Legacy delimiter parser (fallback)
+// ─────────────────────────────────────────────
 function parseProjects(text) {
   const projects = [];
-
-  // Try all known delimiter patterns
   const patterns = [
     /START_PROJECT([\s\S]*?)END_PROJECT/g,
     /===PROJECT===([\s\S]*?)===END===/g,
     /---PROJECT---([\s\S]*?)---END---/g,
+    /START_ARTICLE([\s\S]*?)END_ARTICLE/g,
   ];
 
   let matched = false;
@@ -69,104 +128,127 @@ function parseProjects(text) {
       matched = true;
       const block = match[1];
       const get = (key) => {
-        const m = block.match(new RegExp(key + ":\\s*(.+)"));
-        return m ? m[1].trim() : "";
+        const m2 = block.match(new RegExp(key + ":\\s*(.+)"));
+        return m2 ? m2[1].trim() : "";
       };
-      const p = {
-        title:       get("Title"),
-        id:          get("ID"),
-        location:    get("Location"),
-        summary:     get("Summary"),
-        status:      get("Status"),
-        date:        get("Date"),
-        documentUrl: get("DocumentURL"),
-      };
-      if (p.title || p.id) projects.push(p);
+      const p = normalizeProject({
+        title:        get("Title"),
+        id:           get("ID"),
+        location:     get("Location"),
+        summary:      get("Summary"),
+        status:       get("Status"),
+        date:         get("Date"),
+        document_url: get("DocumentURL"),
+        article_url:  get("ArticleURL"),
+        publish_date: get("PublishDate"),
+        category:     get("Category"),
+        source_type:  get("SourceType"),
+      });
+      if (p) projects.push(p);
     }
     if (matched) break;
   }
 
-  // Smart fallback: if LLM ignored delimiters entirely, try to parse key:value lines
-  if (!matched && text.includes("Title:") && text.includes("ID:")) {
-    const get = (key) => {
-      const m = text.match(new RegExp(key + ":\\s*(.+)"));
-      return m ? m[1].trim() : "";
-    };
-    const p = {
-      title:       get("Title"),
-      id:          get("ID"),
-      location:    get("Location"),
-      summary:     get("Summary"),
-      status:      get("Status"),
-      date:        get("Date"),
-      documentUrl: get("DocumentURL"),
-    };
-    if (p.title || p.id) {
-      projects.push(p);
-      matched = true;
-    }
-  }
-
-  // Strip all block content from prose
   let prose = text;
   for (const regex of patterns) {
     regex.lastIndex = 0;
     prose = prose.replace(regex, "");
   }
-  // Also strip loose key:value lines if we parsed them as fallback
-  if (matched && projects.length > 0) {
+  if (matched) {
     prose = prose
-      .replace(/Title:.*\n?/g, "")
-      .replace(/ID:.*\n?/g, "")
-      .replace(/Location:.*\n?/g, "")
-      .replace(/Summary:.*\n?/g, "")
-      .replace(/Status:.*\n?/g, "")
-      .replace(/Date:.*\n?/g, "")
-      .replace(/DocumentURL:.*\n?/g, "")
-      .replace(/START_PROJECT.*\n?/g, "")
-      .replace(/END_PROJECT.*\n?/g, "");
+      .replace(/(Title|ID|Location|Summary|Status|Date|DocumentURL|ArticleURL|PublishDate|Category|SourceType):.*\n?/g, "")
+      .replace(/(START|END)_(PROJECT|ARTICLE).*\n?/g, "");
   }
-  prose = prose.trim();
 
-  return { projects, prose };
+  return { projects, prose: cleanProse(prose) };
 }
 
+// ─────────────────────────────────────────────
+// Status helpers
+// ─────────────────────────────────────────────
 function statusClass(s) {
   s = (s||"").toLowerCase();
-  if (s.includes("approved"))  return "status-approved";
+  if (s.includes("approved") || s.includes("accepted"))  return "status-approved";
   if (s.includes("denied"))    return "status-denied";
-  if (s.includes("continued")) return "status-continued";
+  if (s.includes("continued") || s.includes("recommended")) return "status-continued";
   return "status-unknown";
 }
 function statusEmoji(s) {
   s = (s||"").toLowerCase();
-  if (s.includes("approved"))  return "✅";
+  if (s.includes("approved") || s.includes("accepted"))  return "✅";
   if (s.includes("denied"))    return "❌";
   if (s.includes("continued")) return "⏳";
+  if (s.includes("recommended")) return "🔁";
   return "⚪";
 }
 
+function isArticle(p) {
+  return p.sourceType === "website_article" || (!!p.articleUrl && !p.documentUrl);
+}
+
+// ─────────────────────────────────────────────
+// Card renderers
+// ─────────────────────────────────────────────
 function renderProjectCard(p) {
+  if (!p) return document.createDocumentFragment();
+  if (isArticle(p)) return renderArticleCard(p);
+
   const card = document.createElement("div");
   card.className = "proj-card";
   const meta = [p.id, p.location].filter(Boolean).join(" · ");
   card.innerHTML = `
-    <div class="proj-title">${escHtml(p.title)}</div>
+    <div class="card-tag card-tag-board">🏛 Board Record</div>
+    <div class="proj-title">${escHtml(p.title || p.id || "Project")}</div>
     ${meta ? `<div class="proj-meta">${escHtml(meta)}</div>` : ""}
     ${p.summary ? `<div class="proj-body">${escHtml(p.summary)}</div>` : ""}
-    <div class="proj-status ${statusClass(p.status)}">${statusEmoji(p.status)} ${escHtml(p.status||"No decision recorded")}${p.date?" · "+escHtml(p.date):""}</div>
+    ${p.status ? `<div class="proj-status ${statusClass(p.status)}">${statusEmoji(p.status)} ${escHtml(p.status)}${p.date?" · "+escHtml(p.date):""}</div>` : (p.date ? `<div class="proj-meta">📅 ${escHtml(p.date)}</div>` : "")}
     <div class="proj-actions">
-      ${p.documentUrl?`<a class="btn-minutes" href="${escHtml(p.documentUrl)}" target="_blank">📄 View Minutes</a>`:""}
-      ${p.location?`<button class="btn-dir" onclick="panAndDirect('${escHtml(p.location)}')">📍 Directions</button>`:""}
+      ${p.documentUrl?`<a class="btn-minutes" href="${escHtml(p.documentUrl)}" target="_blank" rel="noopener">📄 View Minutes</a>`:""}
+      ${p.location?`<button class="btn-dir" onclick="panAndDirect('${escAttr(p.location)}')">📍 Directions</button>`:""}
     </div>`;
   return card;
 }
 
-function appendBotResponse(data) {
+function renderArticleCard(p) {
+  const card = document.createElement("div");
+  card.className = "proj-card article-card";
+  const meta = [p.category, p.publishDate].filter(Boolean).join(" · ");
+  card.innerHTML = `
+    <div class="card-tag card-tag-article">📰 EsteroToday Article</div>
+    <div class="proj-title">${escHtml(p.title || "Article")}</div>
+    ${meta ? `<div class="proj-meta">${escHtml(meta)}</div>` : ""}
+    ${p.summary ? `<div class="proj-body">${escHtml(p.summary)}</div>` : ""}
+    <div class="proj-actions">
+      ${p.articleUrl?`<a class="btn-article" href="${escHtml(p.articleUrl)}" target="_blank" rel="noopener">📰 Read Article ↗</a>`:""}
+      ${p.location?`<button class="btn-dir" onclick="panAndDirect('${escAttr(p.location)}')">📍 Directions</button>`:""}
+    </div>`;
+  return card;
+}
+
+// ─────────────────────────────────────────────
+// Message rendering
+// ─────────────────────────────────────────────
+function renderMarkdown(prose) {
+  const el = document.createElement("div");
+  el.className = "prose";
+  try {
+    if (typeof marked !== "undefined" && marked.parse) {
+      el.innerHTML = marked.parse(prose);
+    } else if (typeof marked === "function") {
+      el.innerHTML = marked(prose);
+    } else {
+      el.innerHTML = escHtml(prose).replace(/\n/g, "<br>");
+    }
+  } catch (e) {
+    console.warn("marked error:", e);
+    el.innerHTML = escHtml(prose).replace(/\n/g, "<br>");
+  }
+  return el;
+}
+
+function buildBotRow(prose, cards) {
   const row = document.createElement("div");
   row.className = "msg-row";
-  const projects = (data.projects || []).map(normalizeProject);
-  const prose = (data.summary || data.answer || "").trim();
   const botDiv = document.createElement("div");
   botDiv.className = "msg-bot";
   const avatar = document.createElement("div");
@@ -175,74 +257,47 @@ function appendBotResponse(data) {
   botDiv.appendChild(avatar);
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  if (prose) {
-    const proseEl = document.createElement("div");
-    try {
-      if (typeof marked !== "undefined" && marked.parse) {
-        proseEl.innerHTML = marked.parse(prose);
-      } else if (typeof marked !== "undefined" && typeof marked === "function") {
-        proseEl.innerHTML = marked(prose);
-      } else {
-        proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-      }
-    } catch (e) {
-      proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-    }
-    bubble.appendChild(proseEl);
+
+  if (prose) bubble.appendChild(renderMarkdown(prose));
+  (cards || []).forEach(c => { if (c) bubble.appendChild(renderProjectCard(c)); });
+
+  if (!prose && (!cards || cards.length === 0)) {
+    const d = document.createElement("div");
+    d.textContent = "Sorry, I couldn't find an answer.";
+    bubble.appendChild(d);
   }
-  projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
-  if (!prose && projects.length === 0) {
-    bubble.appendChild(document.createElement("div")).textContent =
-      "Sorry, I couldn't find an answer.";
-  }
+
   botDiv.appendChild(bubble);
   row.appendChild(botDiv);
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+function appendBotResponse(data) {
+  const cards = ((data.projects || []).concat(data.articles || []))
+    .map(normalizeProject).filter(Boolean);
+  const prose = cleanProse((data.summary || data.answer || "").trim());
+  buildBotRow(prose, cards);
+}
+
 function appendMsg(role, content) {
-  const row = document.createElement("div");
-  row.className = "msg-row";
   if (role === "user") {
+    const row = document.createElement("div");
+    row.className = "msg-row";
     row.innerHTML = `<div class="msg-user"><div class="bubble">${escHtml(content)}</div></div>`;
-  } else {
-    const { projects, prose } = parseProjects(content);
-    const botDiv = document.createElement("div"); botDiv.className = "msg-bot";
-    const avatar = document.createElement("div"); avatar.className = "bot-avatar"; avatar.textContent = "🏛";
-    botDiv.appendChild(avatar);
-    const bubble = document.createElement("div"); bubble.className = "bubble";
-    if (prose) {
-      const proseEl = document.createElement("div");
-      try {
-        // marked@4 uses synchronous marked.parse()
-        if (typeof marked !== "undefined" && marked.parse) {
-          proseEl.innerHTML = marked.parse(prose);
-        } else if (typeof marked !== "undefined" && typeof marked === "function") {
-          proseEl.innerHTML = marked(prose);
-        } else {
-          // Plain text fallback — convert newlines to <br>
-          proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-        }
-      } catch(e) {
-        console.warn("marked error:", e);
-        proseEl.innerHTML = prose.replace(/\n/g, "<br>");
-      }
-      bubble.appendChild(proseEl);
-    }
-    // Project cards
-    projects.forEach(p => bubble.appendChild(renderProjectCard(p)));
-    // Safety fallback: always show something
-    if (!prose && projects.length === 0) {
-      const fallback = document.createElement("div");
-      fallback.innerHTML = content.replace(/\n/g, "<br>");
-      bubble.appendChild(fallback);
-    }
-    botDiv.appendChild(bubble);
-    row.appendChild(botDiv);
+    messagesEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return;
   }
-  messagesEl.appendChild(row);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  // Bot plain-text path: try JSON cards first, then legacy delimiters
+  const jsonCards = extractJsonCards(content);
+  if (jsonCards.length > 0) {
+    buildBotRow(cleanProse(content), jsonCards);
+    return;
+  }
+  const { projects, prose } = parseProjects(content);
+  buildBotRow(prose || cleanProse(content), projects);
 }
 
 function showTyping() {
@@ -252,12 +307,18 @@ function showTyping() {
 }
 function removeTyping() { const t=document.getElementById("typing-row"); if(t)t.remove(); }
 
+// ─────────────────────────────────────────────
+// Streaming (kept; falls back to /chat)
+// ─────────────────────────────────────────────
 async function tryStreamChat(question) {
-  const res = await fetch(`${API_BASE}/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+  } catch (e) { return false; }
   if (!res.ok || !res.body) return false;
 
   removeTyping();
@@ -267,12 +328,14 @@ async function tryStreamChat(question) {
   messagesEl.appendChild(row);
   const bubble = document.getElementById("stream-bubble");
   const proseEl = document.createElement("div");
+  proseEl.className = "prose";
   bubble.appendChild(proseEl);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let fullText = "";
   let donePayload = null;
 
   while (true) {
@@ -283,9 +346,11 @@ async function tryStreamChat(question) {
     buffer = parts.pop() || "";
     for (const part of parts) {
       if (!part.startsWith("data: ")) continue;
-      const payload = JSON.parse(part.slice(6));
+      let payload;
+      try { payload = JSON.parse(part.slice(6)); } catch(e) { continue; }
       if (payload.type === "token" && payload.text) {
-        proseEl.textContent += payload.text;
+        fullText += payload.text;
+        proseEl.textContent = fullText;
         messagesEl.scrollTop = messagesEl.scrollHeight;
       } else if (payload.type === "done") {
         donePayload = payload;
@@ -295,18 +360,21 @@ async function tryStreamChat(question) {
     }
   }
 
-  if (donePayload) {
-    const projects = (donePayload.projects || []).map(normalizeProject);
-    const summary = (donePayload.summary || "").trim();
-    if (summary && !proseEl.textContent.trim()) {
-      proseEl.innerHTML = summary.replace(/\n/g, "<br>");
-    }
-    projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
-  }
+  // Finalize: re-render prose as markdown, extract cards
+  const cards = donePayload
+    ? ((donePayload.projects || []).concat(donePayload.articles || [])).map(normalizeProject).filter(Boolean)
+    : extractJsonCards(fullText);
+  const finalProse = cleanProse((donePayload && donePayload.summary) || fullText);
+  bubble.innerHTML = "";
+  if (finalProse) bubble.appendChild(renderMarkdown(finalProse));
+  cards.forEach(c => bubble.appendChild(renderProjectCard(c)));
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return true;
 }
 
+// ─────────────────────────────────────────────
+// Main send
+// ─────────────────────────────────────────────
 async function sendMessage(overrideText) {
   const q = (overrideText || questionEl.value).trim();
   if (!q) return;
@@ -315,6 +383,7 @@ async function sendMessage(overrideText) {
   try {
     const streamed = await tryStreamChat(q);
     if (streamed) return;
+
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -328,19 +397,23 @@ async function sendMessage(overrideText) {
     }
     const data = await res.json();
     removeTyping();
-    if (data.projects || data.summary) {
+
+    // Structured response path
+    if (data.projects || data.articles || data.summary) {
       appendBotResponse(data);
       return;
     }
-    let answer = (data.answer || data.response || "Sorry, I couldn't find an answer.")
-      .replace(/```json[\s\S]*?```/g, "")
-      .replace(/```[\s\S]*?```/g, "")
-      .trim();
-    if (!answer) {
+
+    // Plain answer path: extract JSON card(s) before stripping
+    const raw = (data.answer || data.response || "");
+    const cards = extractJsonCards(raw);
+    const prose = cleanProse(raw);
+
+    if (!prose && cards.length === 0) {
       appendMsg("bot", "I received an empty response from the backend. Please try again.");
       return;
     }
-    appendMsg("bot", answer);
+    buildBotRow(prose, cards);
   } catch (e) {
     removeTyping();
     console.error("Fetch error:", e);
@@ -352,6 +425,7 @@ function sendChip(el) { sendMessage(el.querySelector("span").textContent); }
 function handleKey(e) { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();} }
 function autoResize(el) { el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,100)+"px"; }
 function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function escAttr(s) { return escHtml(s).replace(/'/g, "&#39;"); }
 
 function panAndDirect(address) {
   window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address+", Estero, FL")}`,"_blank");
@@ -376,7 +450,6 @@ async function loadCSV() {
     const res = await fetch(`${API_BASE}/load`, { method: "POST", body: formData });
     const data = await res.json();
     if (!res.ok) {
-      // Show the actual server error detail
       statusEl.style.color = "var(--denied)";
       statusEl.textContent = "❌ " + (data.detail || "Server error " + res.status);
       console.error("Load error:", data);
