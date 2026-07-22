@@ -136,6 +136,44 @@
       display: inline-flex; align-items: center; gap: 5px;
     }
     .btn-dir:hover { background: var(--navy-light); }
+    .btn-report {
+      background: var(--white); color: var(--text-muted); border: 1.5px solid var(--border);
+      border-radius: 20px; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .btn-report:hover { border-color: var(--navy); color: var(--navy); background: var(--navy-light); }
+
+    /* REPORT DIALOG */
+    .report-dialog {
+      border: none; border-radius: 14px; padding: 0; width: min(440px, calc(100vw - 24px));
+      box-shadow: 0 16px 48px rgba(18, 36, 64, 0.28); color: var(--text);
+    }
+    .report-dialog::backdrop { background: rgba(18, 36, 64, 0.45); }
+    .report-dialog form { padding: 20px 22px 18px; }
+    .report-dialog-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px;
+    }
+    .report-dialog-head h2 { font-size: 17px; font-weight: 700; color: var(--navy); }
+    .report-close {
+      border: none; background: transparent; font-size: 22px; line-height: 1; color: var(--text-muted); cursor: pointer;
+      width: 32px; height: 32px; border-radius: 8px;
+    }
+    .report-close:hover { background: var(--bg); color: var(--navy); }
+    .report-intro { font-size: 13px; color: var(--text-muted); line-height: 1.45; margin-bottom: 14px; }
+    .report-label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--navy); margin: 0 0 6px;
+    }
+    .report-dialog input,
+    .report-dialog select,
+    .report-dialog textarea {
+      width: 100%; border: 1.5px solid var(--border); border-radius: 8px; padding: 9px 11px;
+      font-size: 14px; font-family: var(--font); margin-bottom: 12px; background: var(--white); color: var(--text);
+    }
+    .report-dialog textarea { min-height: 88px; resize: vertical; }
+    .report-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+    .report-form-status { font-size: 12px; margin-top: 10px; color: var(--text-muted); min-height: 1.2em; }
+    .report-form-status.ok { color: var(--success); }
+    .report-form-status.err { color: var(--denied); }
 
     /* TYPING */
     .typing-wrap { display: flex; flex-direction: column; gap: 6px; }

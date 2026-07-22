@@ -62,7 +62,14 @@ Production Docker/Cloud Run can set `EMBEDDING_MODEL=BAAI/bge-m3` for higher qua
 | `GET /ready` | Readiness (index loaded) |
 | `POST /chat` | Structured JSON answer |
 | `POST /chat/stream` | SSE stream (`meta` → `token` → `done`) |
-| `POST /load` | Upload replacement CSV (dev only) |
+| `POST /reports` | Public: report incorrect location / suggest a change |
+| `GET /admin` | Redirects to administrator UI (`/admin.html`) |
+| `GET /admin/status` | Admin: index + report counts (Bearer `ADMIN_API_KEY`) |
+| `GET /admin/reports` | Admin: list user reports |
+| `PATCH /admin/reports/{id}` | Admin: update report status |
+| `POST /load` | Admin: upload replacement CSV + rebuild index |
+
+Set `ADMIN_API_KEY` in `backend/.env`, then open **/admin.html** (or `/admin`) and sign in with that key. Public users submit reports from the chat **Report** button.
 
 ## Project structure
 
