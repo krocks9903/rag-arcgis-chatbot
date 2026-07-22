@@ -74,6 +74,7 @@ RULES:
 4. status must be one of: Approved, Denied, Continued, or No decision recorded.
 5. Each project summary must be 1–2 COMPLETE sentences that end with a period — never cut off mid-sentence.
 6. Return at most 5 of the most relevant projects for the question.
+7. Only include a project if its title, ApplicationID, or location clearly matches the question (e.g. the named business or place). Do not include unrelated procedural agenda items.
 
 Return ONLY valid JSON (no markdown fences):
 {{
@@ -267,6 +268,98 @@ def parse_projects_only(raw: str) -> list[ProjectOut]:
         return []
 
 
+_QUERY_STOP = frozenset(
+    {
+        "are",
+        "is",
+        "was",
+        "were",
+        "there",
+        "any",
+        "new",
+        "the",
+        "and",
+        "for",
+        "what",
+        "show",
+        "about",
+        "have",
+        "has",
+        "had",
+        "with",
+        "from",
+        "that",
+        "this",
+        "these",
+        "those",
+        "minutes",
+        "meeting",
+        "estero",
+        "village",
+        "please",
+        "tell",
+        "me",
+        "you",
+        "how",
+        "many",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "did",
+        "does",
+        "do",
+        "can",
+        "could",
+        "would",
+        "should",
+        "latest",
+        "recent",
+        "find",
+        "list",
+        "all",
+    }
+)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Content tokens for query↔project overlap (light plural stemming)."""
+    toks = re.findall(r"[a-z0-9]{3,}", (text or "").lower())
+    out: set[str] = set()
+    for t in toks:
+        if t in _QUERY_STOP:
+            continue
+        out.add(t)
+        if len(t) > 4 and t.endswith("s") and not t.endswith("ss"):
+            out.add(t[:-1])
+    return out
+
+
+def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """Drop extracted cards that share no content tokens with the question.
+
+    Prevents BM25/LLM false positives like a 2017 "any new evidence" discussion
+    matching "are there any new wawas?".
+    """
+    q = _content_tokens(question)
+    if not q:
+        return projects
+    kept: list[ProjectOut] = []
+    for p in projects:
+        hay = _content_tokens(" ".join([p.title, p.id, p.location, p.summary]))
+        if q & hay:
+            kept.append(p)
+    if kept != projects:
+        logger.info(
+            "filter_projects_for_query dropped %s/%s projects for %r",
+            len(projects) - len(kept),
+            len(projects),
+            question[:80],
+        )
+    return kept
+
+
 def grade_context(hits: list[tuple[Document, float]]) -> str:
     if not hits:
         return "incorrect"
@@ -311,6 +404,7 @@ def _invoke_solo(question: str, context: str, provider: Provider, route: str) ->
     )
     raw = chain.invoke(question)
     result = parse_structured_answer(raw, route=route)
+    result.projects = filter_projects_for_query(question, result.projects)
     result.meta["llm_provider"] = provider
     result.meta["llm_model"] = GEMINI_MODEL if provider == "gemini" else GROQ_MODEL
     result.meta["llm_mode"] = "solo"
@@ -326,7 +420,7 @@ def gemini_extract_projects(question: str, context: str) -> list[ProjectOut]:
         | StrOutputParser()
     )
     raw = chain.invoke(question)
-    return parse_projects_only(raw)
+    return filter_projects_for_query(question, parse_projects_only(raw))
 
 
 def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:

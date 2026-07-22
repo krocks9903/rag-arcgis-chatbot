@@ -144,3 +144,51 @@ def test_keyword_shortcut_for_app_id():
     assert is_strong_keyword_hit(hit, "DOS2022-E016")
     miss = ChatResponse(summary="none", projects=[], answer="none", meta={"matched_rows": 0})
     assert not is_strong_keyword_hit(miss, "Corkscrew Road")
+
+
+def test_filter_projects_for_query_drops_offtopic_new_evidence():
+    from models import ProjectOut
+    from rag_path import filter_projects_for_query
+
+    wawa = ProjectOut(
+        title="Wawa Convenience Food & Beverage Store with Gas",
+        id="DOS2022-E016",
+        location="10081 Estero Town Commons Place",
+    )
+    ordinance = ProjectOut(
+        title="Ordinance No. 2022-10 Estero Town Center (Wawa) Zoning Amendment",
+        id="Ordinance No. 2022-10",
+        location="Estero Town Center Commercial",
+    )
+    junk = ProjectOut(
+        title="Discussion regarding the requirement related to the petitioner providing any new evidence",
+        id="Section 13",
+        location="Village Council meeting",
+        summary="Petitioners must provide new evidence seven days prior.",
+    )
+    kept = filter_projects_for_query("are there any new wawas?", [wawa, ordinance, junk])
+    assert [p.id for p in kept] == ["DOS2022-E016", "Ordinance No. 2022-10"]
+
+
+def test_filter_projects_for_query_keeps_all_when_vague():
+    from models import ProjectOut
+    from rag_path import filter_projects_for_query
+
+    projects = [
+        ProjectOut(title="Some Road Work", id="A1"),
+        ProjectOut(title="Other Item", id="B2"),
+    ]
+    # Only stopwords / short tokens → do not over-filter.
+    assert filter_projects_for_query("what was approved?", projects) == projects
+
+
+def test_bm25_tokenize_stems_wawas_and_drops_stopwords():
+    from store import _tokenize
+
+    toks = _tokenize("are there any new wawas?")
+    assert "wawas" in toks
+    assert "wawa" in toks
+    assert "any" not in toks
+    assert "are" not in toks
+    assert "there" not in toks
+
