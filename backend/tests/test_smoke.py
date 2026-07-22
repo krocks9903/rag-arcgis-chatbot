@@ -178,7 +178,9 @@ def test_filter_projects_for_query_keeps_all_when_vague():
         ProjectOut(title="Some Road Work", id="A1"),
         ProjectOut(title="Other Item", id="B2"),
     ]
-    # Only stopwords / short tokens → do not over-filter.
+    # Stopwords-only → no content tokens → do not filter.
+    assert filter_projects_for_query("tell me please?", projects) == projects
+    # Content token with no title overlap would empty the list; fall back instead.
     assert filter_projects_for_query("what was approved?", projects) == projects
 
 

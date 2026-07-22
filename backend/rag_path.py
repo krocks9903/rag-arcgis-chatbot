@@ -341,6 +341,10 @@ def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list
 
     Prevents BM25/LLM false positives like a 2017 "any new evidence" discussion
     matching "are there any new wawas?".
+
+    If the question has no content tokens, or overlap would drop every card
+    (e.g. "what was approved?" vs titles that omit that word), keep the
+    original list so vague status questions still work.
     """
     q = _content_tokens(question)
     if not q:
@@ -350,6 +354,8 @@ def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list
         hay = _content_tokens(" ".join([p.title, p.id, p.location, p.summary]))
         if q & hay:
             kept.append(p)
+    if not kept:
+        return projects
     if kept != projects:
         logger.info(
             "filter_projects_for_query dropped %s/%s projects for %r",
