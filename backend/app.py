@@ -17,7 +17,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from admin_auth import require_admin
 from config import (
-    ADMIN_API_KEY,
     DATA_DIR,
     DEFAULT_CSV_PATH,
     EMBEDDING_MODEL,
@@ -25,6 +24,7 @@ from config import (
     RERANKER_MODEL,
     SERVE_FRONTEND,
 )
+import config as app_config
 from models import (
     ChatRequest,
     ChatResponse,
@@ -251,7 +251,7 @@ def admin_status(_: None = Depends(require_admin)):
     store = get_store()
     return {
         "status": "ok",
-        "admin_configured": bool(ADMIN_API_KEY),
+        "admin_configured": bool(app_config.ADMIN_API_KEY),
         "chain_ready": _chain_ready(),
         "record_count": _record_count(),
         "chunk_count": store.chunk_count if store else 0,
