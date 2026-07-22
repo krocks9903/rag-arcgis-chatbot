@@ -52,7 +52,52 @@ def _metadata_from_chunk(chunk_id: str, text: str) -> dict[str, Any]:
 
 
 def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    """BM25 tokens: drop short/stop words and light-stem simple plurals."""
+    stop = {
+        "are",
+        "is",
+        "was",
+        "were",
+        "there",
+        "any",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "these",
+        "those",
+        "have",
+        "has",
+        "had",
+        "did",
+        "does",
+        "do",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "or",
+        "as",
+        "be",
+        "it",
+    }
+    out: list[str] = []
+    for tok in re.findall(r"[a-z0-9]+", text.lower()):
+        if len(tok) < 3 or tok in stop:
+            continue
+        out.append(tok)
+        if len(tok) > 4 and tok.endswith("s") and not tok.endswith("ss"):
+            stem = tok[:-1]
+            if stem not in stop and len(stem) >= 3:
+                out.append(stem)
+    return out
 
 
 @dataclass
