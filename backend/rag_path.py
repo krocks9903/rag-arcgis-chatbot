@@ -23,7 +23,7 @@ from config import (
 )
 from models import ChatResponse, ProjectOut, RouteKind
 from prompt_loader import load_prompt
-from retrieval import best_score, format_docs, hybrid_retrieve
+from retrieval import best_score, format_docs, hybrid_retrieve, scope_hits_to_project
 from store import DataStore
 
 logger = logging.getLogger(__name__)
@@ -222,7 +222,10 @@ def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, 
             meta["rewrites"].append(query)
     meta["best_score"] = float(round(best_score(hits), 4))
     meta["retrieved"] = len(hits)
-    return format_docs(hits), meta
+    scoped = scope_hits_to_project(store, hits)
+    if len(scoped) != len(hits):
+        meta["project_scoped"] = len(scoped)
+    return format_docs(scoped), meta
 
 
 def _invoke_solo(question: str, context: str, provider: Provider, route: str) -> ChatResponse:

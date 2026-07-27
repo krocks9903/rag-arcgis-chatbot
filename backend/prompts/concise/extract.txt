@@ -8,6 +8,7 @@ RULES:
 5. status must be one of: Approved, Denied, Continued, or No decision recorded.
 6. Each project summary is exactly one complete sentence ending with a period.
 7. Return at most 3 projects.
+8. Records sharing the same project_id belong to the same project; only attribute an action to a project when its record's project_id matches — never infer shared identity from a common road, location, or keyword.
 
 Return ONLY valid JSON (no markdown fences):
 {{
