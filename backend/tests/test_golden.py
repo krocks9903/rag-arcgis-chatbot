@@ -37,15 +37,19 @@ def test_router_matches_golden_expectations(golden_cases):
         assert got == case["route"], f"{case['question']!r} -> {got}, want {case['route']}"
 
 
+def test_structured_count_has_rows(dataframe, golden_cases):
+    case = next(c for c in golden_cases if c.get("min_rows") is not None and c["min_rows"] >= 1)
+    result = answer_structured(dataframe, case["question"])
+    assert result.meta.get("matched_rows", 0) >= case["min_rows"]
+
+
 def test_keyword_finds_application_id(dataframe, golden_cases):
-    case = next(c for c in golden_cases if c.get("expect_ids"))
+    case = next(
+        c
+        for c in golden_cases
+        if c.get("expect_ids") and c.get("route") == "keyword" and len(c["question"].split()) == 1
+    )
     result = answer_keyword(dataframe, case["question"])
     ids = {p.id.upper() for p in result.projects}
     for expected in case["expect_ids"]:
         assert any(expected.upper() in i for i in ids), f"missing {expected} in {ids}"
-
-
-def test_structured_count_has_rows(dataframe, golden_cases):
-    case = next(c for c in golden_cases if c.get("min_rows"))
-    result = answer_structured(dataframe, case["question"])
-    assert result.meta.get("matched_rows", 0) >= case["min_rows"]

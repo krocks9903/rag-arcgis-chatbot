@@ -19,7 +19,17 @@ def test_app_metadata():
 
 def test_expected_routes_registered():
     paths = {route.path for route in backend_app.app.routes}
-    assert {"/health", "/ready", "/chat", "/chat/stream", "/load", "/reports", "/admin/status", "/recent-decisions"}.issubset(paths)
+    assert {
+        "/health",
+        "/ready",
+        "/chat",
+        "/chat/stream",
+        "/load",
+        "/feedback",
+        "/reports",
+        "/admin/status",
+        "/recent-decisions",
+    }.issubset(paths)
 
 
 def test_csv_hash_is_stable(tmp_path):
@@ -144,3 +154,39 @@ def test_keyword_shortcut_for_app_id():
     assert is_strong_keyword_hit(hit, "DOS2022-E016")
     miss = ChatResponse(summary="none", projects=[], answer="none", meta={"matched_rows": 0})
     assert not is_strong_keyword_hit(miss, "Corkscrew Road")
+
+
+def test_prompt_loader_default_and_concise():
+    from prompt_loader import clear_prompt_cache, load_prompt
+
+    clear_prompt_cache()
+    solo = load_prompt("solo", "default")
+    assert "{context}" in solo and "{question}" in solo
+    concise = load_prompt("summary", "concise")
+    assert "{projects_json}" in concise
+    assert "2–3" in concise or "2-3" in concise
+
+
+def test_feedback_endpoint_writes_jsonl(tmp_path, monkeypatch):
+    import feedback_store
+    import models
+
+    feedback_file = tmp_path / "feedback.jsonl"
+    monkeypatch.setattr(feedback_store, "FEEDBACK_DIR", str(tmp_path))
+    monkeypatch.setattr(feedback_store, "FEEDBACK_FILE", str(feedback_file))
+
+    req = models.FeedbackRequest(
+        session_id="test",
+        question="What about Wawa?",
+        rating="up",
+        route="rag",
+        summary="- Wawa was discussed.",
+        project_ids=["DCI2021-E004"],
+    )
+    out = feedback_store.append_feedback(req)
+    assert out["ok"] is True
+    line = feedback_file.read_text(encoding="utf-8").strip()
+    payload = __import__("json").loads(line)
+    assert payload["rating"] == "up"
+    assert payload["question"] == "What about Wawa?"
+    assert "DCI2021-E004" in payload["project_ids"]

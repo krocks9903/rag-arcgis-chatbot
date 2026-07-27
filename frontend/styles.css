@@ -109,6 +109,29 @@
       border-radius: 8px;
     }
 
+    .feedback-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .feedback-btn {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2px 8px;
+      cursor: pointer;
+      line-height: 1.4;
+    }
+    .feedback-btn:hover:not(:disabled) { border-color: var(--navy); }
+    .feedback-btn.selected { border-color: var(--navy); background: #e8eef5; }
+    .feedback-btn:disabled { opacity: 0.7; cursor: default; }
+    .feedback-thanks { color: var(--success, #2f6b3a); }
+
     /* FIX 2: project cards */
     .proj-card {
       background: var(--white); border: 1px solid var(--border);

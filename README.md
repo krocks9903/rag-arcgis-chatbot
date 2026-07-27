@@ -73,6 +73,7 @@ Question → Router
 | `GET /ready` | Readiness (index loaded) |
 | `POST /chat` | Structured JSON answer |
 | `POST /chat/stream` | SSE stream (`meta` → `token` → `done`) |
+| `POST /feedback` | Thumbs up/down on an answer (JSONL under `backend/data/feedback/`) |
 | `POST /reports` | Public: report incorrect location / suggest a change |
 | `GET /admin` | Redirects to administrator UI (`/admin.html`) |
 | `GET /admin/status` | Admin: index + report counts (Bearer `ADMIN_API_KEY`) |
@@ -81,6 +82,35 @@ Question → Router
 | `POST /load` | Admin: upload replacement CSV + rebuild index |
 
 Set `ADMIN_API_KEY` in `backend/.env`, then open **/admin.html** and sign in with that key. Public users submit reports from the chat **Report** button (vanilla and React).
+
+## Response optimization
+
+Measure and tune answer quality offline; collect live thumbs in the UI.
+
+**Golden set:** `backend/tests/golden_qa.json` (route labels, `expect_ids`, `must_contain`).
+
+**Quality eval** (ID recall + rule checks; optional LLM via full `/chat`):
+
+```bash
+python scripts/eval_quality.py --retrieve-only
+python scripts/eval_quality.py --variant concise --limit 10
+```
+
+Reports land in `backend/data/eval_reports/` (gitignored).
+
+**Retrieval sweep:**
+
+```bash
+python scripts/sweep_retrieval.py --limit 12
+```
+
+**Prompt packs:** `backend/prompts/default/` and `backend/prompts/concise/`. Set `PROMPT_VARIANT=concise` to switch.
+
+**Feedback summary:**
+
+```bash
+python scripts/summarize_feedback.py
+```
 
 ## Project structure
 
