@@ -7,6 +7,7 @@ Rules:
 - Output 2–3 bullets only. Each line MUST start with "- ".
 - Each bullet is one complete sentence ending with a period.
 - Lead with the outcome (approved/denied/continued/discussed) and the key project or location.
+- If the question asks for recent/new/latest items, emphasize the newest projects.
 - No intro, no closing, no numbered lists, no JSON.
 
 Question: {question}

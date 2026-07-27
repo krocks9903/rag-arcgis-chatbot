@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from langchain.schema import Document
@@ -17,6 +17,8 @@ from config import (
     PROJECT_SCOPE_MIN_SUPPORT,
     RECENCY_BOOST,
     RECENCY_HALF_LIFE_DAYS,
+    RECENT_QUERY_BOOST,
+    RECENT_QUERY_MAX_AGE_YEARS,
     RERANK_CANDIDATES,
     RERANKER_MODEL,
     RERANK_K,
@@ -30,6 +32,25 @@ _YEAR_RE = re.compile(r"\b(20\d{2})\b")
 _DATE_BODY_RE = re.compile(r"meeting_date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 _YEAR_BODY_RE = re.compile(r"meeting_year:\s*(20\d{2})", re.IGNORECASE)
 _ISO_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+# Conversational recency cues ("recent developments", "anything new", …).
+# Explicit years are handled separately as historical intent.
+_RECENT_QUERY_RE = re.compile(
+    r"\b("
+    r"recent(?:ly)?|latest|newest|lately|nowadays|"
+    r"this\s+year|last\s+year|past\s+(?:year|few\s+years?|months?)|"
+    r"last\s+(?:few\s+)?(?:years?|months?)|"
+    r"new(?:er)?|current(?:ly)?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def query_wants_recent(query: str) -> bool:
+    """True when the question asks for recent/new/latest (and names no year)."""
+    q = (query or "").strip()
+    if not q or _YEAR_RE.search(q):
+        return False
+    return bool(_RECENT_QUERY_RE.search(q))
 
 
 def get_reranker() -> CrossEncoder:
@@ -92,17 +113,27 @@ def apply_recency_boost(
     query: str,
     *,
     boost: float | None = None,
+    intent_query: str | None = None,
 ) -> list[tuple[Document, float]]:
-    """Re-rank by relevance + recency (or prefer an explicit year in the query)."""
+    """Re-rank by relevance + recency (or prefer an explicit year in the query).
+
+    intent_query carries the citizen's original question for temporal intent so
+    CRAG rewrites that inject year-like tokens cannot disable recent-mode.
+    """
     if not ENABLE_RECENCY_BOOST or not ranked:
         return ranked
-    weight = RECENCY_BOOST if boost is None else boost
-    if weight <= 0:
-        return ranked
 
-    year_m = _YEAR_RE.search(query or "")
+    intent = intent_query if intent_query is not None else query
+    year_m = _YEAR_RE.search(intent or "")
     target_year = int(year_m.group(1)) if year_m else None
+    wants_recent = target_year is None and query_wants_recent(intent)
+    if boost is None:
+        weight = RECENT_QUERY_BOOST if wants_recent else RECENCY_BOOST
+    else:
+        weight = boost
     today = date.today()
+    if weight <= 0:
+        return prefer_recent_hits(ranked, intent, today=today)
 
     rescored: list[tuple[Document, float]] = []
     for doc, score in ranked:
@@ -122,14 +153,54 @@ def apply_recency_boost(
         if meeting:
             doc.metadata["meeting_date"] = meeting.isoformat()
         rescored.append((doc, float(score) + weight * r))
-    return sorted(rescored, key=lambda x: -x[1])
+    rescored = sorted(rescored, key=lambda x: -x[1])
+    return prefer_recent_hits(rescored, intent, today=today)
 
 
-def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]]:
+def prefer_recent_hits(
+    ranked: list[tuple[Document, float]],
+    query: str,
+    *,
+    today: date | None = None,
+    max_age_years: float | None = None,
+) -> list[tuple[Document, float]]:
+    """When the question asks for recent items, drop old hits.
+
+    Never restores known-old dated hits: fresh → undated → empty.
+    """
+    if not ranked or not query_wants_recent(query):
+        return ranked
+    years = RECENT_QUERY_MAX_AGE_YEARS if max_age_years is None else max_age_years
+    if years <= 0:
+        return ranked
+    today = today or date.today()
+    cutoff = today - timedelta(days=int(years * 365.25))
+    fresh: list[tuple[Document, float]] = []
+    undated: list[tuple[Document, float]] = []
+    for doc, score in ranked:
+        meeting = document_meeting_date(doc)
+        if meeting is None:
+            undated.append((doc, score))
+        elif meeting >= cutoff:
+            fresh.append((doc, score))
+    if fresh:
+        return fresh
+    if undated:
+        return undated
+    return []
+
+
+def hybrid_retrieve(
+    store: DataStore,
+    query: str,
+    *,
+    intent_query: str | None = None,
+) -> list[tuple[Document, float]]:
     """Dense FAISS + BM25 via RRF, then optional cross-encoder rerank + recency."""
     if store.vectorstore is None or store.bm25 is None:
         return []
 
+    intent = intent_query if intent_query is not None else query
     dense_hits = store.vectorstore.similarity_search_with_score(query, k=DENSE_K)
     dense_ranking = [d.metadata.get("chunk_id", "") for d, _ in dense_hits if d.metadata.get("chunk_id")]
 
@@ -149,11 +220,15 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
             candidates.append(doc_map[doc_id])
 
     if not candidates:
-        return apply_recency_boost([(d, float(s)) for d, s in dense_hits[:RERANK_K]], query)
+        return apply_recency_boost(
+            [(d, float(s)) for d, s in dense_hits[:RERANK_K]],
+            query,
+            intent_query=intent,
+        )
 
     if not ENABLE_RERANKER:
         ranked = [(d, 1.0 - (i * 0.05)) for i, d in enumerate(candidates[: max(RERANK_K * 2, RERANK_K)])]
-        return apply_recency_boost(ranked, query)[:RERANK_K]
+        return apply_recency_boost(ranked, query, intent_query=intent)[:RERANK_K]
 
     reranker = get_reranker()
     pairs = [(query, d.page_content) for d in candidates]
@@ -162,7 +237,7 @@ def hybrid_retrieve(store: DataStore, query: str) -> list[tuple[Document, float]
     ranked = [(d, float(s)) for d, s in sorted(zip(candidates, scores), key=lambda x: -float(x[1]))]
     filtered = [(d, s) for d, s in ranked if s >= SCORE_THRESHOLD]
     pool = filtered or ranked
-    return apply_recency_boost(pool, query)[:RERANK_K]
+    return apply_recency_boost(pool, query, intent_query=intent)[:RERANK_K]
 
 
 def _project_id(doc: Document) -> str:
