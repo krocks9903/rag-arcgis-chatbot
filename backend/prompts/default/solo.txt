@@ -10,6 +10,7 @@ RULES — follow exactly:
 6. document_url must be copied exactly from Document_Link in the context — never invent URLs.
 7. status must be one of: Approved, Denied, Continued, or No decision recorded.
 8. Prefer the most relevant projects (up to 5).
+9. Records sharing the same project_id are the same project; group them. Only attribute an action to a project when its record's project_id matches — never infer that two records concern the same project from a shared road, location, or keyword.
 
 Return ONLY valid JSON (no markdown fences) with this exact shape:
 {{
