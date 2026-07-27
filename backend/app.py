@@ -35,6 +35,7 @@ from models import (
     ReportStatusUpdate,
 )
 from orchestrator import answer_question, stream_answer
+from rate_limit import enforce_rate_limit
 from reports import create_report, list_reports, report_counts, update_report
 from schema_aliases import row_value
 from store import build_store, get_store
@@ -167,7 +168,7 @@ def ready():
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, _: None = Depends(enforce_rate_limit("chat"))):
     try:
         return answer_question(req.question)
     except HTTPException:
@@ -195,7 +196,7 @@ def warmup():
 
 
 @app.post("/chat/stream")
-def chat_stream(req: ChatRequest):
+def chat_stream(req: ChatRequest, _: None = Depends(enforce_rate_limit("chat"))):
     try:
         return StreamingResponse(stream_answer(req.question), media_type="text/event-stream")
     except HTTPException:
@@ -206,7 +207,7 @@ def chat_stream(req: ChatRequest):
 
 
 @app.post("/reports", response_model=ReportOut)
-def submit_report(payload: ReportCreate):
+def submit_report(payload: ReportCreate, _: None = Depends(enforce_rate_limit("public_write"))):
     """Public: flag an incorrect location or suggest a data change."""
     try:
         return create_report(payload)
@@ -282,7 +283,7 @@ def admin_update_report(
 
 
 @app.post("/feedback")
-def feedback(req: FeedbackRequest):
+def feedback(req: FeedbackRequest, _: None = Depends(enforce_rate_limit("public_write"))):
     rating = (req.rating or "").strip().lower()
     if rating not in {"up", "down"}:
         raise HTTPException(400, "rating must be 'up' or 'down'")

@@ -359,10 +359,23 @@ const SESSION_ID = (() => {
     }
     return id;
   } catch (_) {
-    return "default";
+    return "default-device";
   }
 })();
 
+function apiHeaders(extra) {
+  return Object.assign(
+    { "Content-Type": "application/json", "X-Device-Id": SESSION_ID },
+    extra || {},
+  );
+}
+
+function rateLimitMessage(status, detail) {
+  if (status === 429) {
+    return "⚠️ Too many requests — wait a moment and try again.";
+  }
+  return "⚠️ Backend error " + status + ": " + (detail || "Unknown error");
+}
 function renderFeedbackBar(data, question) {
   const bar = document.createElement("div");
   bar.className = "feedback-bar";
@@ -381,7 +394,7 @@ function renderFeedbackBar(data, question) {
       try {
         await fetch(`${API_BASE}/feedback`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: apiHeaders(),
           body: JSON.stringify({
             session_id: SESSION_ID,
             question: question || "",
@@ -538,10 +551,16 @@ async function tryStreamChat(question) {
   try {
     const res = await fetch(`${API_BASE}/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify({ question }),
       signal: controller.signal,
     });
+    if (res.status === 429) {
+      const err = await res.json().catch(() => ({}));
+      removeTyping();
+      appendMsg("bot", rateLimitMessage(429, err.detail));
+      return true;
+    }
     if (!res.ok || !res.body) return false;
 
     removeTyping();
@@ -641,12 +660,18 @@ async function sendMessage(overrideText) {
     try {
       res = await fetch(`${API_BASE}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders(),
         body: JSON.stringify({ question: q }),
         signal: controller.signal,
       });
     } finally {
       clearTimeout(timeoutId);
+    }
+    if (res.status === 429) {
+      const err = await res.json().catch(() => ({}));
+      removeTyping();
+      appendMsg("bot", rateLimitMessage(429, err.detail));
+      return;
     }
     if (res.ok) {
       const data = await res.json();
@@ -658,7 +683,7 @@ async function sendMessage(overrideText) {
       appendMsg("bot", "I received an empty response from the backend. Please try again.");
       return;
     }
-    // Fall back to stream only if /chat failed.
+    // Fall back to stream only if /chat failed (not rate-limited).
     console.warn("/chat failed with", res.status, "— trying stream");
     try {
       const streamed = await tryStreamChat(q);
@@ -668,8 +693,7 @@ async function sendMessage(overrideText) {
     }
     const err = await res.json().catch(() => ({}));
     removeTyping();
-    appendMsg("bot", "⚠️ Backend error " + res.status + ": " + (err.detail || "Unknown error"));
-  } catch (e) {
+    appendMsg("bot", rateLimitMessage(res.status, err.detail));  } catch (e) {
     removeTyping();
     console.error("Fetch error:", e);
     appendMsg("bot", `⚠️ Could not reach the backend at ${API_BASE}. The request may have timed out — try a more specific question (e.g. an Application ID).`);
@@ -751,11 +775,14 @@ async function submitReport(event) {
   try {
     const res = await fetch(`${API_BASE}/reports`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (res.status === 429) {
+        throw new Error("Too many requests — wait a moment and try again.");
+      }
       throw new Error(data.detail || `Could not send (${res.status})`);
     }
     status.textContent = "Thanks — your report was submitted.";

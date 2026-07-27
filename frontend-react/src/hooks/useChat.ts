@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { API_BASE } from "../lib/config";
+import { apiHeaders } from "../lib/deviceId";
 import {
   cleanProse,
   extractJsonCards,
@@ -22,16 +23,32 @@ function patchMessage(setMessages: Setter, id: string, patch: Partial<ChatMessag
   setMessages((msgs) => msgs.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 }
 
+function rateLimitProse(status: number, detail?: string): string {
+  if (status === 429) {
+    return "⚠️ Too many requests — wait a moment and try again.";
+  }
+  return `⚠️ Backend error ${status}: ${detail || "Unknown error"}`;
+}
+
 async function tryStreamChat(question: string, botId: string, setMessages: Setter): Promise<boolean> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify({ question }),
     });
   } catch {
     return false;
+  }
+  if (res.status === 429) {
+    const err = await res.json().catch(() => ({}) as { detail?: string });
+    patchMessage(setMessages, botId, {
+      prose: rateLimitProse(429, err.detail),
+      streaming: false,
+      error: true,
+    });
+    return true;
   }
   if (!res.ok || !res.body) return false;
 
@@ -91,14 +108,14 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
   try {
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify({ question }),
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}) as { detail?: string });
       patchMessage(setMessages, botId, {
-        prose: `⚠️ Backend error ${res.status}: ${err.detail || "Unknown error"}`,
+        prose: rateLimitProse(res.status, err.detail),
         streaming: false,
         error: true,
       });

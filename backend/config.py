@@ -67,3 +67,12 @@ REPORTS_FILE = os.getenv(
     "REPORTS_FILE",
     os.path.join(DATA_DIR, "ops", "reports.json"),
 )
+
+# Public endpoint rate limits (in-memory, per process). Device = X-Device-Id.
+ENABLE_RATE_LIMIT = os.getenv("ENABLE_RATE_LIMIT", "true").lower() not in {"0", "false", "no"}
+RATE_LIMIT_CHAT_DEVICE = int(os.getenv("RATE_LIMIT_CHAT_DEVICE", "20"))
+RATE_LIMIT_CHAT_IP = int(os.getenv("RATE_LIMIT_CHAT_IP", "40"))
+RATE_LIMIT_CHAT_WINDOW_S = int(os.getenv("RATE_LIMIT_CHAT_WINDOW_S", "60"))
+RATE_LIMIT_WRITE_DEVICE = int(os.getenv("RATE_LIMIT_WRITE_DEVICE", "10"))
+RATE_LIMIT_WRITE_IP = int(os.getenv("RATE_LIMIT_WRITE_IP", "20"))
+RATE_LIMIT_WRITE_WINDOW_S = int(os.getenv("RATE_LIMIT_WRITE_WINDOW_S", "60"))
