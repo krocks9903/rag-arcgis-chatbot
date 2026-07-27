@@ -53,3 +53,9 @@ EVAL_REPORTS_DIR = os.path.join(DATA_DIR, "eval_reports")
 
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "").lower() in {"1", "true", "yes"}
 SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "true").lower() not in {"0", "false", "no"}
+# Bearer token for /admin/* and /load. Leave empty to disable admin mutations.
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+REPORTS_FILE = os.getenv(
+    "REPORTS_FILE",
+    os.path.join(DATA_DIR, "ops", "reports.json"),
+)
