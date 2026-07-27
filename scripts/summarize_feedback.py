@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Summarize thumbs feedback for prompt/golden iteration."""
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from config import FEEDBACK_FILE  # noqa: E402
+from config import FEEDBACK_FILE
 
 
 def main() -> int:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Score golden Q&A for RAG response optimization (no RAGAS required).
 
 Examples:
@@ -20,9 +19,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from config import DEFAULT_CSV_PATH, EVAL_REPORTS_DIR, PROMPT_VARIANT  # noqa: E402
-from prompt_loader import clear_prompt_cache  # noqa: E402
-from store import build_store, get_store  # noqa: E402
+from config import DEFAULT_CSV_PATH, EVAL_REPORTS_DIR, PROMPT_VARIANT
+from prompt_loader import clear_prompt_cache
+from store import build_store, get_store
 
 
 def _load_golden(path: Path) -> list[dict[str, Any]]:

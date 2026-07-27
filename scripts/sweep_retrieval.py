@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Sweep retrieval knobs against golden expect_ids (retrieve-only).
 
 Example:
@@ -83,7 +82,7 @@ def main() -> int:
                     "cases": summary.get("cases"),
                 }
             )
-        except Exception as e:
+        except (OSError, RuntimeError, json.JSONDecodeError, subprocess.SubprocessError) as e:
             ranked.append({"config": cfg, "error": str(e), "mean_id_recall": -1, "pass_rate": -1})
 
     def sort_key(row: dict):
