@@ -5,20 +5,96 @@
     "expect_ids": ["DOS2023-E005"]
   },
   {
+    "question": "DOS2022-E016",
+    "route": "keyword",
+    "expect_ids": ["DOS2022-E016"]
+  },
+  {
+    "question": "DCI2021-E004",
+    "route": "keyword",
+    "expect_ids": ["DCI2021-E004"],
+    "must_contain": ["Wawa"]
+  },
+  {
+    "question": "DOS2022-E001",
+    "route": "keyword",
+    "expect_ids": ["DOS2022-E001"]
+  },
+  {
     "question": "How many records were approved in 2023?",
     "route": "structured",
     "min_rows": 1
   },
   {
+    "question": "How many approved projects in 2022?",
+    "route": "structured",
+    "min_rows": 1
+  },
+  {
+    "question": "Count denied applications in 2021",
+    "route": "structured",
+    "min_rows": 0
+  },
+  {
     "question": "What happened with Goodwill?",
-    "route": "rag"
+    "route": "rag",
+    "must_contain": ["Goodwill"],
+    "must_not_contain": ["I don't have records on that"]
+  },
+  {
+    "question": "Explain the Wawa zoning amendment",
+    "route": "rag",
+    "expect_ids": ["DCI2021-E004"],
+    "must_contain": ["Wawa"]
+  },
+  {
+    "question": "Tell me about RiverCreek Phase 2",
+    "route": "rag",
+    "must_contain": ["River"]
+  },
+  {
+    "question": "What happened with Estero Town Center?",
+    "route": "rag",
+    "must_contain": ["Estero"]
   },
   {
     "question": "Show minutes for 2023",
     "route": "keyword"
   },
   {
+    "question": "Minutes for meeting on 2022",
+    "route": "keyword"
+  },
+  {
     "question": "Corkscrew Road projects",
+    "route": "mixed",
+    "must_contain": ["Corkscrew"]
+  },
+  {
+    "question": "Three Oaks Parkway development",
+    "route": "mixed"
+  },
+  {
+    "question": "US 41 corridor projects",
+    "route": "rag"
+  },
+  {
+    "question": "Why was the Wawa application discussed?",
+    "route": "rag",
+    "expect_ids": ["DCI2021-E004"]
+  },
+  {
+    "question": "Summary of BERT trail discussion",
+    "route": "rag",
+    "must_contain": ["BERT"]
+  },
+  {
+    "question": "List all rezoning cases in 2020",
+    "route": "structured",
+    "min_rows": 0
+  },
+  {
+    "question": "Via Coconut Point Drive projects",
     "route": "mixed"
   }
 ]

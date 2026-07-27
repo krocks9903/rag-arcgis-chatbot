@@ -15,7 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import DATA_DIR, DEFAULT_CSV_PATH, EMBEDDING_MODEL, FRONTEND_DIR, SERVE_FRONTEND
-from models import ChatRequest, ChatResponse
+from feedback_store import append_feedback
+from models import ChatRequest, ChatResponse, FeedbackRequest
 from orchestrator import answer_question, stream_answer
 from store import build_store, get_store
 
@@ -178,6 +179,21 @@ def chat_stream(req: ChatRequest):
         return StreamingResponse(stream_answer(req.question), media_type="text/event-stream")
     except HTTPException:
         raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, str(e)) from e
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackRequest):
+    rating = (req.rating or "").strip().lower()
+    if rating not in {"up", "down"}:
+        raise HTTPException(400, "rating must be 'up' or 'down'")
+    if not (req.question or "").strip():
+        raise HTTPException(400, "question is required")
+    try:
+        req.rating = rating
+        return append_feedback(req)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(500, str(e)) from e

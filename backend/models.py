@@ -35,3 +35,14 @@ class ChatResponse(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     session_id: str = "default"
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = "default"
+    question: str
+    rating: str  # "up" | "down"
+    comment: str = ""
+    route: str = ""
+    summary: str = ""
+    project_ids: list[str] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)

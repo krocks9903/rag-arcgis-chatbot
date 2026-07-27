@@ -62,7 +62,37 @@ Production Docker/Cloud Run can set `EMBEDDING_MODEL=BAAI/bge-m3` for higher qua
 | `GET /ready` | Readiness (index loaded) |
 | `POST /chat` | Structured JSON answer |
 | `POST /chat/stream` | SSE stream (`meta` → `token` → `done`) |
+| `POST /feedback` | Thumbs up/down on an answer (JSONL under `backend/data/feedback/`) |
 | `POST /load` | Upload replacement CSV (dev only) |
+
+## Response optimization
+
+Measure and tune answer quality offline; collect live thumbs in the UI.
+
+**Golden set:** `backend/tests/golden_qa.json` (route labels, `expect_ids`, `must_contain`).
+
+**Quality eval** (ID recall + rule checks; optional LLM via full `/chat`):
+
+```bash
+python scripts/eval_quality.py --retrieve-only
+python scripts/eval_quality.py --variant concise --limit 10
+```
+
+Reports land in `backend/data/eval_reports/` (gitignored).
+
+**Retrieval sweep:**
+
+```bash
+python scripts/sweep_retrieval.py --limit 12
+```
+
+**Prompt packs:** `backend/prompts/default/` and `backend/prompts/concise/`. Set `PROMPT_VARIANT=concise` to switch.
+
+**Feedback summary:**
+
+```bash
+python scripts/summarize_feedback.py
+```
 
 ## Project structure
 

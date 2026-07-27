@@ -44,6 +44,12 @@ RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.35"))
 RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "1095"))
 # Warn users when an answer cites meeting records older than this many years.
 STALE_SOURCE_YEARS = float(os.getenv("STALE_SOURCE_YEARS", "5"))
+# Prompt pack under backend/prompts/<variant>/ (default | concise).
+PROMPT_VARIANT = os.getenv("PROMPT_VARIANT", "default").strip() or "default"
+
+FEEDBACK_DIR = os.path.join(DATA_DIR, "feedback")
+FEEDBACK_FILE = os.path.join(FEEDBACK_DIR, "feedback.jsonl")
+EVAL_REPORTS_DIR = os.path.join(DATA_DIR, "eval_reports")
 
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "").lower() in {"1", "true", "yes"}
 SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "true").lower() not in {"0", "false", "no"}

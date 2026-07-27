@@ -335,7 +335,63 @@ function renderStaleNotice(meta) {
   return el;
 }
 
-function appendBotResponse(data) {
+const SESSION_ID = (() => {
+  try {
+    const key = "estero_chat_session";
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = "s_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch (_) {
+    return "default";
+  }
+})();
+
+function renderFeedbackBar(data, question) {
+  const bar = document.createElement("div");
+  bar.className = "feedback-bar";
+  bar.innerHTML = `
+    <span class="feedback-label">Was this helpful?</span>
+    <button type="button" class="feedback-btn" data-rating="up" aria-label="Helpful">👍</button>
+    <button type="button" class="feedback-btn" data-rating="down" aria-label="Not helpful">👎</button>
+    <span class="feedback-thanks" hidden>Thanks for the feedback.</span>
+  `;
+  const thanks = bar.querySelector(".feedback-thanks");
+  bar.querySelectorAll(".feedback-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const rating = btn.getAttribute("data-rating");
+      bar.querySelectorAll(".feedback-btn").forEach((b) => { b.disabled = true; });
+      btn.classList.add("selected");
+      try {
+        await fetch(`${API_BASE}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: SESSION_ID,
+            question: question || "",
+            rating,
+            route: data.route || "",
+            summary: (data.summary || data.answer || "").slice(0, 2000),
+            project_ids: (data.projects || []).map((p) => p.id || p.ApplicationId || "").filter(Boolean),
+            meta: {
+              llm_mode: data.meta && data.meta.llm_mode,
+              prompt_variant: data.meta && data.meta.prompt_variant,
+              stale_sources: data.meta && data.meta.stale_sources,
+            },
+          }),
+        });
+      } catch (e) {
+        console.warn("feedback failed", e);
+      }
+      if (thanks) thanks.hidden = false;
+    });
+  });
+  return bar;
+}
+
+function appendBotResponse(data, question) {
   const row = document.createElement("div");
   row.className = "msg-row";
   const projects = (data.projects || []).map(normalizeProject);
@@ -362,6 +418,7 @@ function appendBotResponse(data) {
     bubble.appendChild(document.createElement("div")).textContent =
       "Sorry, I couldn't find an answer.";
   }
+  bubble.appendChild(renderFeedbackBar(data, question || ""));
   botDiv.appendChild(bubble);
   row.appendChild(botDiv);
   messagesEl.appendChild(row);
@@ -529,6 +586,7 @@ async function tryStreamChat(question) {
       projects.forEach((p) => bubble.appendChild(renderProjectCard(p)));
       const staleEl = renderStaleNotice(donePayload.meta);
       if (staleEl) bubble.appendChild(staleEl);
+      bubble.appendChild(renderFeedbackBar(donePayload, question || ""));
       if (!proseEl.textContent.trim() && !proseEl.querySelector("li") && projects.length === 0) {
         proseEl.textContent = "Sorry, I couldn't find an answer.";
       }
@@ -580,7 +638,7 @@ async function sendMessage(overrideText) {
       const data = await res.json();
       removeTyping();
       if (data.projects || data.summary || data.answer) {
-        appendBotResponse(data);
+        appendBotResponse(data, q);
         return;
       }
       appendMsg("bot", "I received an empty response from the backend. Please try again.");

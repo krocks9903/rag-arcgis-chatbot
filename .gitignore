@@ -23,3 +23,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Local eval / feedback artifacts (regeneratable or user-generated)
+backend/data/feedback/
+backend/data/eval_reports/
