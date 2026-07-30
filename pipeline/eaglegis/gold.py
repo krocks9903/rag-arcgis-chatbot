@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import re
 
+from .classifiers import infer_item_status
+
 AI_PUBLIC_FIELDS = [
     "RecordId", "SourceBoard", "DataGrain", "RecordType", "MeetingId",
     "ItemId", "MotionId", "Board", "MeetingFormat", "MeetingType",
@@ -135,7 +137,7 @@ def build_ai_public_rows(tables: dict[str, list[dict]]) -> list[dict]:
             "MeetingYear": _text(meeting.get("meeting_year")),
             "MeetingTime": _text(meeting.get("meeting_time")),
             "MeetingVenue": _text(meeting.get("venue_name")),
-            "Status": _text(meeting.get("status")),
+            "Status": infer_item_status(action, meeting_status=meeting.get("status")),
             "AgendaItemNumber": item_number,
             "AgendaItemType": item_type,
             "FactCategory": _slug(item.get("action_type")),

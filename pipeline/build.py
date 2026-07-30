@@ -37,6 +37,7 @@ from eaglegis.extractors import (
     split_csv_actions,
 )
 from eaglegis.gold import AI_PUBLIC_FIELDS, build_ai_public_rows
+from eaglegis.projects import ItemView, build_projects
 from eaglegis.sources import PdfAsset, iter_git_pdfs, iter_local_pdfs, read_git_text
 from eaglegis.text import extract_pdf_text
 from eaglegis.writer import write_csv
@@ -1072,7 +1073,43 @@ class NormalizedBuilder:
             "reason": reason,
         })
 
+    def _finalize_projects(self) -> None:
+        """Rebuild the project tables from the fully-extracted agenda items
+        using the shared application/name grouping, replacing the alias seeds."""
+        cat_name = {c["category_id"]: c["category_name"] for c in self.agenda_categories}
+        loc_by_item: dict = defaultdict(list)
+        for loc in self.locations_v2:
+            loc_by_item[loc["item_id"]].append(loc)
+
+        def primary_location_name(item_id) -> str:
+            locs = loc_by_item.get(item_id, [])
+            if not locs:
+                return ""
+            primary = next(
+                (rec for rec in locs if str(rec.get("is_primary")).lower() == "true"),
+                min(locs, key=lambda rec: int(rec.get("location_seq") or 0)),
+            )
+            return primary.get("location_name") or primary.get("address_normalized") or ""
+
+        views = [
+            ItemView(
+                item_id=item["item_id"],
+                title=item.get("item_title") or item.get("project_title") or "",
+                application_id=item.get("application_id") or "",
+                category_name=cat_name.get(item.get("category_id"), ""),
+                action_type=item.get("action_type") or "",
+                location_name=primary_location_name(item["item_id"]),
+            )
+            for item in self.agenda_items
+        ]
+        projects, links, names = build_projects(views)
+        self.projects = projects
+        self.agenda_item_projects = links
+        for item in self.agenda_items:
+            item["project_matches"] = names.get(item["item_id"], "")
+
     def write(self, out_dir: Path) -> None:
+        self._finalize_projects()
         # Medallion layout, matching the legacy EagleGIS repo's bronze/silver/
         # gold tiers (and the consumer contract in rag-arcgis-chatbot's
         # sync-data.yml, which pulls gold/meetings_ai_public.csv):
