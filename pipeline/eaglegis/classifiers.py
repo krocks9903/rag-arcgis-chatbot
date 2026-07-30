@@ -57,6 +57,43 @@ def infer_action_type(text: str, meeting_type: str) -> str:
     return "Unknown"
 
 
+def infer_item_status(action_text: str | None, *, meeting_status: str | None = None) -> str:
+    """Derive an agenda item's disposition from the action/outcome text pulled
+    out of the minutes, instead of stamping the meeting-level default.
+
+    Returns one of: Cancelled, Approved, Denied, Failed, Withdrawn, Tabled,
+    Continued, No Action, Unknown. Precedence matters: an explicitly recorded
+    "no formal action" is the literal outcome even when the agenda item's
+    description (concatenated after it) mentions an approval verb, and a
+    negative result (denied/failed) outranks the far more common approvals so
+    it is not buried.
+    """
+    if meeting_status and meeting_status.strip().lower() == "cancelled":
+        return "Cancelled"
+    text = (action_text or "").strip().lower()
+    if not text:
+        return "Unknown"
+    # A literal "no action" statement is the recorded outcome; trailing agenda
+    # description text after it must not flip the item to Approved.
+    if re.match(r"no formal action|no action (found|recorded|extracted|taken)|no action\b", text):
+        return "No Action"
+    if "meeting cancelled" in text or re.search(r"\bcancel", text):
+        return "Cancelled"
+    if re.search(r"\bdenied\b|\bdeny\b|\brejected\b|\breject\b", text):
+        return "Denied"
+    if re.search(r"\bfailed\b|\bfails\b|did not pass|motion fail", text):
+        return "Failed"
+    if re.search(r"\bwithdrew\b|\bwithdrawn\b", text):
+        return "Withdrawn"
+    if re.search(r"\btabled\b", text):
+        return "Tabled"
+    if re.search(r"continu|deferred|\bdefer\b|postpone", text):
+        return "Continued"
+    if re.search(r"approv|adopt|\bpassed\b|\bauthoriz|\bgranted\b|\benacted\b|carried", text):
+        return "Approved"
+    return "Unknown"
+
+
 SUBJECT_CATEGORIES = {
     "Residential Development",
     "Commercial & Mixed-Use Development",
