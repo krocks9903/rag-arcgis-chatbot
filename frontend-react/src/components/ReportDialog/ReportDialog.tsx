@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../../lib/config";
+import { apiHeaders } from "../../lib/deviceId";
 
 export type ReportKind = "incorrect_location" | "suggest_change" | "other";
 
@@ -53,7 +54,7 @@ export default function ReportDialog({ open, onClose, prefill }: ReportDialogPro
     try {
       const res = await fetch(`${API_BASE}/reports`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders(),
         body: JSON.stringify({
           kind,
           application_id: applicationId.trim(),
@@ -66,8 +67,12 @@ export default function ReportDialog({ open, onClose, prefill }: ReportDialogPro
         }),
       });
       const data = await res.json().catch(() => ({} as { detail?: string }));
-      if (!res.ok) throw new Error(data.detail || `Could not send (${res.status})`);
-      setStatus({ text: "Thanks — your report was submitted.", ok: true });
+      if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error("Too many requests — wait a moment and try again.");
+        }
+        throw new Error(data.detail || `Could not send (${res.status})`);
+      }      setStatus({ text: "Thanks — your report was submitted.", ok: true });
       setTimeout(onClose, 900);
     } catch (err) {
       setStatus({
