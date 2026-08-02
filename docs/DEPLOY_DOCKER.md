@@ -233,6 +233,8 @@ Copy the **provider resource name** for GitHub secret `GCP_WORKLOAD_IDENTITY_PRO
 | Name | Value |
 |------|--------|
 | `GROQ_API_KEY` | your Groq key |
+| `GEMINI_API_KEY` | your Gemini key (collaborate mode) |
+| `ADMIN_API_KEY` | long random secret for `/admin.html` and `/load` |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | full WIF provider path |
 | `GCP_SERVICE_ACCOUNT` | `github-deploy@PROJECT.iam.gserviceaccount.com` |
 
@@ -259,10 +261,11 @@ pre-bakes the FAISS index to keep this as fast as possible.
 
 ## Checklist
 
-- [ ] `backend/.env` with `GROQ_API_KEY`
+- [ ] `backend/.env` with `GROQ_API_KEY` (and `ADMIN_API_KEY` for admin)
 - [ ] `docker compose up --build` works locally
 - [ ] GCP project + billing + APIs enabled
 - [ ] Image pushed to Artifact Registry
 - [ ] Cloud Run deploy returns `/ready` OK
 - [ ] `frontend/config.js` → Cloud Run URL
 - [ ] (Optional) GitHub WIF + `ENABLE_DEPLOY=true`
+- [ ] GitHub secret `ADMIN_API_KEY` set before Cloud Run deploy (required by `deploy.yml`)

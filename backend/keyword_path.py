@@ -7,6 +7,7 @@ import pandas as pd
 
 from config import ENABLE_KEYWORD_SHORTCUT, KEYWORD_FAST_MAX_ROWS
 from models import ChatResponse, RouteKind
+from retrieval import query_wants_recent
 from router import APP_ID_RE, NARRATIVE_RE, YEAR_RE
 from schema_aliases import pick_column, search_columns
 from structured_path import _row_to_project
@@ -65,6 +66,10 @@ def is_strong_keyword_hit(kw: ChatResponse, question: str) -> bool:
     # Application IDs are unique enough to trust without synthesis.
     if APP_ID_RE.search(question):
         return True
+    # Conversational "recent/new/latest" needs RAG + age filtering; keyword
+    # token matches can surface a handful of old rows and skip that path.
+    if query_wants_recent(question):
+        return False
     # Broad narrative over many hits still needs RAG prose.
     if NARRATIVE_RE.search(question) and n > min(3, KEYWORD_FAST_MAX_ROWS):
         return False

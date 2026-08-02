@@ -37,6 +37,17 @@ class ChatRequest(BaseModel):
     session_id: str = "default"
 
 
+class FeedbackRequest(BaseModel):
+    session_id: str = "default"
+    question: str
+    rating: str  # "up" | "down"
+    comment: str = ""
+    route: str = ""
+    summary: str = ""
+    project_ids: list[str] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class ReportKind(str, Enum):
     INCORRECT_LOCATION = "incorrect_location"
     SUGGEST_CHANGE = "suggest_change"

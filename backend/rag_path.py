@@ -7,6 +7,7 @@ import os
 import re
 import time
 from collections.abc import Iterator
+from datetime import date, timedelta
 from typing import Any, Literal
 
 from langchain.prompts import PromptTemplate
@@ -22,103 +23,35 @@ from config import (
     SCORE_THRESHOLD,
 )
 from models import ChatResponse, ProjectOut, RouteKind
-from retrieval import best_score, format_docs, hybrid_retrieve
+from prompt_loader import load_prompt
+from config import RECENT_QUERY_MAX_AGE_YEARS
+from retrieval import (
+    best_score,
+    format_docs,
+    hits_meta,
+    hybrid_retrieve,
+    query_wants_recent,
+    scope_hits_to_project,
+)
+from stale_sources import parse_source_date
 from store import DataStore
 
 logger = logging.getLogger(__name__)
 
-# Solo full-answer prompt (when only one provider is available).
-PROMPT_TEMPLATE = """You are a helpful assistant for the Village of Estero's Engage Estero platform.
-You help residents understand Planning, Zoning & Design Board decisions using official meeting records.
-
-RULES — follow exactly:
-1. Only use facts from the Context. Never invent any detail.
-2. If no relevant info exists, set summary to exactly: "I don't have records on that." and projects to [].
-3. Write plain English. No markdown, no asterisks.
-4. The top-level "summary" must answer the question as 2–5 markdown bullet points (each line starts with "- "). Every bullet must be a complete sentence ending with a period.
-5. For each matching project, fill every field from the Context only. Each project "summary" must be 1–2 complete sentences.
-6. document_url must be copied exactly from Document_Link in the context — never invent URLs.
-7. status must be one of: Approved, Denied, Continued, or No decision recorded.
-8. Prefer the most relevant projects (up to 5).
-
-Return ONLY valid JSON (no markdown fences) with this exact shape:
-{{
-  "summary": "- First key point.\\n- Second key point.\\n- Third key point.",
-  "projects": [
-    {{
-      "title": "short project name from ProjectName",
-      "id": "ApplicationID",
-      "location": "Location or LocationName",
-      "summary": "1-2 complete sentences",
-      "status": "Approved | Denied | Continued | No decision recorded",
-      "date": "MeetingDate",
-      "document_url": "Document_Link"
-    }}
-  ]
-}}
-
-Context:
-{context}
-
-Question: {question}
-
-JSON:"""
-
-# Gemini role: structured extraction from retrieved records.
-EXTRACT_TEMPLATE = """You extract Planning, Zoning & Design Board project facts for the Village of Estero.
-
-RULES:
-1. Only use facts from the Context. Never invent details.
-2. If nothing relevant, return {{"projects": []}}.
-3. document_url must be copied exactly from Document_Link.
-4. status must be one of: Approved, Denied, Continued, or No decision recorded.
-5. Each project summary must be 1–2 COMPLETE sentences that end with a period — never cut off mid-sentence.
-6. Return at most 5 of the most relevant projects for the question.
-7. Only include a project if its title, ApplicationID, or location clearly matches the question (e.g. the named business or place). Do not include unrelated procedural agenda items.
-
-Return ONLY valid JSON (no markdown fences):
-{{
-  "projects": [
-    {{
-      "title": "short project name",
-      "id": "ApplicationID",
-      "location": "Location",
-      "summary": "1-2 complete sentences",
-      "status": "Approved | Denied | Continued | No decision recorded",
-      "date": "MeetingDate",
-      "document_url": "Document_Link"
-    }}
-  ]
-}}
-
-Context:
-{context}
-
-Question: {question}
-
-JSON:"""
-
-# Groq role: citizen-facing answer from Gemini's extracted projects.
-SUMMARY_TEMPLATE = """You write clear answers for Estero residents about Planning & Zoning decisions.
-
-Given the resident question and the verified project list, write a bullet-point answer.
-Rules:
-- Directly answer the question using only these projects. Do not invent records.
-- If projects is empty, reply exactly: I don't have records on that.
-- Output 2–5 bullets. Each line MUST start with "- " (dash + space).
-- Each bullet is one complete sentence ending with a period. Never stop mid-word or mid-sentence.
-- Cover the main outcomes (approved, denied, continued, or discussed) and name key projects or locations when helpful.
-- No intro sentence, no closing sentence outside the bullets, no numbered lists, no JSON.
-
-Question: {question}
-
-Projects JSON:
-{projects_json}
-
-Answer:"""
-
 Provider = Literal["gemini", "groq"]
 _llms: dict[str, Any] = {}
+
+
+def _prompt(name: str) -> str:
+    import config as cfg
+
+    return load_prompt(name, cfg.PROMPT_VARIANT)
+
+
+def _variant_name() -> str:
+    import config as cfg
+
+    return cfg.PROMPT_VARIANT
 
 
 def gemini_available() -> bool:
@@ -316,9 +249,19 @@ _QUERY_STOP = frozenset(
         "should",
         "latest",
         "recent",
+        "recently",
         "find",
         "list",
         "all",
+        "developments",
+        "development",
+        "projects",
+        "project",
+        "updates",
+        "update",
+        "happening",
+        "going",
+        "on",
     }
 )
 
@@ -366,6 +309,51 @@ def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list
     return kept
 
 
+def filter_projects_for_recency(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """When the user asks for recent/new items, drop older project cards.
+
+    Never restores known-old dated cards: fresh → undated → empty.
+    Fresh cards are sorted newest-first.
+    """
+    if not projects or not query_wants_recent(question):
+        return projects
+    years = RECENT_QUERY_MAX_AGE_YEARS
+    if years <= 0:
+        return projects
+    cutoff = date.today() - timedelta(days=int(years * 365.25))
+    kept: list[ProjectOut] = []
+    undated: list[ProjectOut] = []
+    for p in projects:
+        d = parse_source_date(p.date)
+        if d is None:
+            undated.append(p)
+        elif d >= cutoff:
+            kept.append(p)
+    if kept:
+        kept.sort(
+            key=lambda p: parse_source_date(p.date) or date.min,
+            reverse=True,
+        )
+        result = kept
+    elif undated:
+        result = undated
+    else:
+        result = []
+    if result != projects:
+        logger.info(
+            "filter_projects_for_recency kept %s/%s for %r",
+            len(result),
+            len(projects),
+            question[:80],
+        )
+    return result
+
+
+def refine_projects_for_question(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """Apply entity overlap then recency filters to extracted project cards."""
+    return filter_projects_for_recency(question, filter_projects_for_query(question, projects))
+
+
 def grade_context(hits: list[tuple[Document, float]]) -> str:
     if not hits:
         return "incorrect"
@@ -378,7 +366,15 @@ def grade_context(hits: list[tuple[Document, float]]) -> str:
 
 
 def rewrite_query(question: str) -> str:
-    return f"{question.strip()} Estero Florida planning zoning design board"
+    """Expand a weak query for a CRAG retry without injecting bare years.
+
+    Bare years would trip query_wants_recent's year detector if intent were
+    derived from the rewrite; we still avoid them for cleaner retrieval text.
+    """
+    base = f"{question.strip()} Estero Florida planning zoning design board"
+    if query_wants_recent(question):
+        return f"{base} recent planning meetings last two years"
+    return base
 
 
 def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, Any]]:
@@ -387,21 +383,24 @@ def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, 
     hits: list[tuple[Document, float]] = []
     for i in range(CRAG_MAX_ITERS):
         meta["crag_iters"] = i + 1
-        hits = hybrid_retrieve(store, query)
+        # Recency intent always follows the original citizen question.
+        hits = hybrid_retrieve(store, query, intent_query=question)
         verdict = grade_context(hits)
         meta["last_verdict"] = verdict
         if verdict == "correct":
             break
         if verdict in {"incorrect", "ambiguous"} and i < CRAG_MAX_ITERS - 1:
-            query = rewrite_query(query)
+            query = rewrite_query(question)
             meta["rewrites"].append(query)
-    meta["best_score"] = float(round(best_score(hits), 4))
-    meta["retrieved"] = len(hits)
-    return format_docs(hits), meta
+    scoped = scope_hits_to_project(store, hits)
+    if len(scoped) != len(hits):
+        meta["project_scoped"] = len(scoped)
+    meta.update(hits_meta(scoped))
+    return format_docs(scoped), meta
 
 
 def _invoke_solo(question: str, context: str, provider: Provider, route: str) -> ChatResponse:
-    prompt = PromptTemplate(template=PROMPT_TEMPLATE, input_variables=["context", "question"])
+    prompt = PromptTemplate(template=_prompt("solo"), input_variables=["context", "question"])
     chain = (
         {"context": lambda _: context, "question": RunnablePassthrough()}
         | prompt
@@ -410,15 +409,16 @@ def _invoke_solo(question: str, context: str, provider: Provider, route: str) ->
     )
     raw = chain.invoke(question)
     result = parse_structured_answer(raw, route=route)
-    result.projects = filter_projects_for_query(question, result.projects)
+    result.projects = refine_projects_for_question(question, result.projects)
     result.meta["llm_provider"] = provider
     result.meta["llm_model"] = GEMINI_MODEL if provider == "gemini" else GROQ_MODEL
     result.meta["llm_mode"] = "solo"
+    result.meta["prompt_variant"] = _variant_name()
     return result
 
 
 def gemini_extract_projects(question: str, context: str) -> list[ProjectOut]:
-    prompt = PromptTemplate(template=EXTRACT_TEMPLATE, input_variables=["context", "question"])
+    prompt = PromptTemplate(template=_prompt("extract"), input_variables=["context", "question"])
     chain = (
         {"context": lambda _: context, "question": RunnablePassthrough()}
         | prompt
@@ -426,12 +426,12 @@ def gemini_extract_projects(question: str, context: str) -> list[ProjectOut]:
         | StrOutputParser()
     )
     raw = chain.invoke(question)
-    return filter_projects_for_query(question, parse_projects_only(raw))
+    return refine_projects_for_question(question, parse_projects_only(raw))
 
 
 def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:
     projects_json = json.dumps([p.model_dump() for p in projects[:5]], ensure_ascii=False)
-    prompt = PromptTemplate(template=SUMMARY_TEMPLATE, input_variables=["question", "projects_json"])
+    prompt = PromptTemplate(template=_prompt("summary"), input_variables=["question", "projects_json"])
     chain = prompt | get_llm("groq") | StrOutputParser()
     text = chain.invoke({"question": question, "projects_json": projects_json})
     text = format_summary_bullets(text)
@@ -448,7 +448,7 @@ def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:
 
 def stream_groq_summary(question: str, projects: list[ProjectOut]) -> Iterator[str]:
     projects_json = json.dumps([p.model_dump() for p in projects[:5]], ensure_ascii=False)
-    prompt = PromptTemplate(template=SUMMARY_TEMPLATE, input_variables=["question", "projects_json"])
+    prompt = PromptTemplate(template=_prompt("summary"), input_variables=["question", "projects_json"])
     chain = prompt | get_llm("groq") | StrOutputParser()
     for chunk in chain.stream({"question": question, "projects_json": projects_json}):
         if chunk:
@@ -479,6 +479,7 @@ def generate_collaborative(
             "llm_mode": "collaborate",
             "llm_providers": ["gemini", "groq"],
             "llm_models": {"extract": GEMINI_MODEL, "summary": GROQ_MODEL},
+            "prompt_variant": _variant_name(),
             "extract_ms": extract_ms,
             "summary_ms": summary_ms,
         },
@@ -544,7 +545,7 @@ def invoke_llm(question: str, context: str, tier: str = "fast", route: str = Rou
 def stream_llm_tokens(question: str, context: str, tier: str = "fast") -> Iterator[str]:
     """Solo-stream full JSON (fallback when collaborate streaming is not used)."""
     provider: Provider = "gemini" if tier in {"fast", "gemini"} and gemini_available() else "groq"
-    prompt = PromptTemplate(template=PROMPT_TEMPLATE, input_variables=["context", "question"])
+    prompt = PromptTemplate(template=_prompt("solo"), input_variables=["context", "question"])
     chain = (
         {"context": lambda _: context, "question": RunnablePassthrough()}
         | prompt

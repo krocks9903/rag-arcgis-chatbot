@@ -42,8 +42,25 @@ ENABLE_RECENCY_BOOST = os.getenv("ENABLE_RECENCY_BOOST", "true").lower() not in 
 RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.35"))
 # Days until a record's recency score halves (≈3 years).
 RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "1095"))
+# Conversational "recent/new/latest" queries: stronger boost + hard age window.
+RECENT_QUERY_BOOST = float(os.getenv("RECENT_QUERY_BOOST", "1.25"))
+RECENT_QUERY_MAX_AGE_YEARS = float(os.getenv("RECENT_QUERY_MAX_AGE_YEARS", "3"))
+
+# Project-scoped retrieval: when the top hits converge on one project (via the
+# ProjectId grouping key from the gold corpus), expand to that project's full
+# linked set (recall) and drop hits from a different project (precision).
+ENABLE_PROJECT_SCOPE = os.getenv("ENABLE_PROJECT_SCOPE", "true").lower() not in {"0", "false", "no"}
+PROJECT_SCOPE_MIN_SUPPORT = int(os.getenv("PROJECT_SCOPE_MIN_SUPPORT", "2"))
+PROJECT_SCOPE_CAP = int(os.getenv("PROJECT_SCOPE_CAP", "20"))
+
 # Warn users when an answer cites meeting records older than this many years.
 STALE_SOURCE_YEARS = float(os.getenv("STALE_SOURCE_YEARS", "5"))
+# Prompt pack under backend/prompts/<variant>/ (default | concise).
+PROMPT_VARIANT = os.getenv("PROMPT_VARIANT", "default").strip() or "default"
+
+FEEDBACK_DIR = os.path.join(DATA_DIR, "feedback")
+FEEDBACK_FILE = os.path.join(FEEDBACK_DIR, "feedback.jsonl")
+EVAL_REPORTS_DIR = os.path.join(DATA_DIR, "eval_reports")
 
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "").lower() in {"1", "true", "yes"}
 SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "true").lower() not in {"0", "false", "no"}
