@@ -9,8 +9,9 @@ RULES — follow exactly:
 5. For each matching project, fill every field from the Context only. Each project "summary" must be 1–2 complete sentences.
 6. document_url must be copied exactly from Document_Link in the context — never invent URLs.
 7. status must be one of: Approved, Denied, Continued, or No decision recorded.
-8. Prefer the most relevant projects (up to 5).
-9. Records sharing the same project_id are the same project; group them. Only attribute an action to a project when its record's project_id matches — never infer that two records concern the same project from a shared road, location, or keyword.
+7. Prefer the most relevant projects (up to 5). When the question asks for recent, new, latest, or current items, prefer the newest meeting dates and omit older records unless nothing newer is in the Context.
+8. Records sharing the same project_id are the same project; group them. Only attribute an action to a project when its record's project_id matches — never infer that two records concern the same project from a shared road, location, or keyword.
+9. Only include a project if its title, ApplicationID, or location clearly matches the question (e.g. the named business or place). Do not include unrelated procedural agenda items.
 
 Return ONLY valid JSON (no markdown fences) with this exact shape:
 {{

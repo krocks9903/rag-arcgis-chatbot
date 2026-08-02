@@ -7,6 +7,7 @@ import os
 import re
 import time
 from collections.abc import Iterator
+from datetime import date, timedelta
 from typing import Any, Literal
 
 from langchain.prompts import PromptTemplate
@@ -23,7 +24,16 @@ from config import (
 )
 from models import ChatResponse, ProjectOut, RouteKind
 from prompt_loader import load_prompt
-from retrieval import best_score, format_docs, hybrid_retrieve, scope_hits_to_project
+from config import RECENT_QUERY_MAX_AGE_YEARS
+from retrieval import (
+    best_score,
+    format_docs,
+    hits_meta,
+    hybrid_retrieve,
+    query_wants_recent,
+    scope_hits_to_project,
+)
+from stale_sources import parse_source_date
 from store import DataStore
 
 logger = logging.getLogger(__name__)
@@ -191,6 +201,159 @@ def parse_projects_only(raw: str) -> list[ProjectOut]:
         return []
 
 
+_QUERY_STOP = frozenset(
+    {
+        "are",
+        "is",
+        "was",
+        "were",
+        "there",
+        "any",
+        "new",
+        "the",
+        "and",
+        "for",
+        "what",
+        "show",
+        "about",
+        "have",
+        "has",
+        "had",
+        "with",
+        "from",
+        "that",
+        "this",
+        "these",
+        "those",
+        "minutes",
+        "meeting",
+        "estero",
+        "village",
+        "please",
+        "tell",
+        "me",
+        "you",
+        "how",
+        "many",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "did",
+        "does",
+        "do",
+        "can",
+        "could",
+        "would",
+        "should",
+        "latest",
+        "recent",
+        "recently",
+        "find",
+        "list",
+        "all",
+        "developments",
+        "development",
+        "projects",
+        "project",
+        "updates",
+        "update",
+        "happening",
+        "going",
+        "on",
+    }
+)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Content tokens for query↔project overlap (light plural stemming)."""
+    toks = re.findall(r"[a-z0-9]{3,}", (text or "").lower())
+    out: set[str] = set()
+    for t in toks:
+        if t in _QUERY_STOP:
+            continue
+        out.add(t)
+        if len(t) > 4 and t.endswith("s") and not t.endswith("ss"):
+            out.add(t[:-1])
+    return out
+
+
+def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """Drop extracted cards that share no content tokens with the question.
+
+    Prevents BM25/LLM false positives like a 2017 "any new evidence" discussion
+    matching "are there any new wawas?".
+
+    If the question has no content tokens, or overlap would drop every card
+    (e.g. "what was approved?" vs titles that omit that word), keep the
+    original list so vague status questions still work.
+    """
+    q = _content_tokens(question)
+    if not q:
+        return projects
+    kept: list[ProjectOut] = []
+    for p in projects:
+        hay = _content_tokens(" ".join([p.title, p.id, p.location, p.summary]))
+        if q & hay:
+            kept.append(p)
+    if not kept:
+        return projects
+    if kept != projects:
+        logger.info(
+            "filter_projects_for_query dropped %s/%s projects for %r",
+            len(projects) - len(kept),
+            len(projects),
+            question[:80],
+        )
+    return kept
+
+
+def filter_projects_for_recency(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """When the user asks for recent/new items, drop older project cards.
+
+    Never restores known-old dated cards: fresh → undated → empty.
+    Fresh cards are sorted newest-first.
+    """
+    if not projects or not query_wants_recent(question):
+        return projects
+    years = RECENT_QUERY_MAX_AGE_YEARS
+    if years <= 0:
+        return projects
+    cutoff = date.today() - timedelta(days=int(years * 365.25))
+    kept: list[ProjectOut] = []
+    undated: list[ProjectOut] = []
+    for p in projects:
+        d = parse_source_date(p.date)
+        if d is None:
+            undated.append(p)
+        elif d >= cutoff:
+            kept.append(p)
+    if kept:
+        kept.sort(
+            key=lambda p: parse_source_date(p.date) or date.min,
+            reverse=True,
+        )
+        result = kept
+    elif undated:
+        result = undated
+    else:
+        result = []
+    if result != projects:
+        logger.info(
+            "filter_projects_for_recency kept %s/%s for %r",
+            len(result),
+            len(projects),
+            question[:80],
+        )
+    return result
+
+
+def refine_projects_for_question(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """Apply entity overlap then recency filters to extracted project cards."""
+    return filter_projects_for_recency(question, filter_projects_for_query(question, projects))
+
+
 def grade_context(hits: list[tuple[Document, float]]) -> str:
     if not hits:
         return "incorrect"
@@ -203,7 +366,15 @@ def grade_context(hits: list[tuple[Document, float]]) -> str:
 
 
 def rewrite_query(question: str) -> str:
-    return f"{question.strip()} Estero Florida planning zoning design board"
+    """Expand a weak query for a CRAG retry without injecting bare years.
+
+    Bare years would trip query_wants_recent's year detector if intent were
+    derived from the rewrite; we still avoid them for cleaner retrieval text.
+    """
+    base = f"{question.strip()} Estero Florida planning zoning design board"
+    if query_wants_recent(question):
+        return f"{base} recent planning meetings last two years"
+    return base
 
 
 def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, Any]]:
@@ -212,19 +383,19 @@ def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, 
     hits: list[tuple[Document, float]] = []
     for i in range(CRAG_MAX_ITERS):
         meta["crag_iters"] = i + 1
-        hits = hybrid_retrieve(store, query)
+        # Recency intent always follows the original citizen question.
+        hits = hybrid_retrieve(store, query, intent_query=question)
         verdict = grade_context(hits)
         meta["last_verdict"] = verdict
         if verdict == "correct":
             break
         if verdict in {"incorrect", "ambiguous"} and i < CRAG_MAX_ITERS - 1:
-            query = rewrite_query(query)
+            query = rewrite_query(question)
             meta["rewrites"].append(query)
-    meta["best_score"] = float(round(best_score(hits), 4))
-    meta["retrieved"] = len(hits)
     scoped = scope_hits_to_project(store, hits)
     if len(scoped) != len(hits):
         meta["project_scoped"] = len(scoped)
+    meta.update(hits_meta(scoped))
     return format_docs(scoped), meta
 
 
@@ -238,6 +409,7 @@ def _invoke_solo(question: str, context: str, provider: Provider, route: str) ->
     )
     raw = chain.invoke(question)
     result = parse_structured_answer(raw, route=route)
+    result.projects = refine_projects_for_question(question, result.projects)
     result.meta["llm_provider"] = provider
     result.meta["llm_model"] = GEMINI_MODEL if provider == "gemini" else GROQ_MODEL
     result.meta["llm_mode"] = "solo"
@@ -254,7 +426,7 @@ def gemini_extract_projects(question: str, context: str) -> list[ProjectOut]:
         | StrOutputParser()
     )
     raw = chain.invoke(question)
-    return parse_projects_only(raw)
+    return refine_projects_for_question(question, parse_projects_only(raw))
 
 
 def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:

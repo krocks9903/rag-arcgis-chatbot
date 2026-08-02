@@ -42,6 +42,9 @@ ENABLE_RECENCY_BOOST = os.getenv("ENABLE_RECENCY_BOOST", "true").lower() not in 
 RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.35"))
 # Days until a record's recency score halves (≈3 years).
 RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "1095"))
+# Conversational "recent/new/latest" queries: stronger boost + hard age window.
+RECENT_QUERY_BOOST = float(os.getenv("RECENT_QUERY_BOOST", "1.25"))
+RECENT_QUERY_MAX_AGE_YEARS = float(os.getenv("RECENT_QUERY_MAX_AGE_YEARS", "3"))
 
 # Project-scoped retrieval: when the top hits converge on one project (via the
 # ProjectId grouping key from the gold corpus), expand to that project's full
