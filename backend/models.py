@@ -22,6 +22,11 @@ class ProjectOut(BaseModel):
     status: str = "No decision recorded"
     date: str = ""
     document_url: str = ""
+    # Geocoded point for the record's primary location, when the gold corpus
+    # has one. Lets the map auto-zoom to a result instead of re-geocoding the
+    # location string. Null when the record was never geocoded.
+    lat: float | None = None
+    lng: float | None = None
 
 
 class ChatResponse(BaseModel):

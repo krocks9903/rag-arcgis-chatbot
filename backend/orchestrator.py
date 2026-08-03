@@ -28,7 +28,7 @@ from rag_path import (
 from router import route_question
 from stale_sources import attach_stale_source_notice
 from store import get_store
-from structured_path import answer_structured
+from structured_path import answer_structured, attach_coords
 from tracing import trace_span
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,7 @@ def answer_question(question: str) -> ChatResponse:
                 result = answer_rag(store, question)
         total_ms = round((time.perf_counter() - t0) * 1000)
         result.meta["latency_ms"] = total_ms
+        attach_coords(result.projects, store.dataframe)
         attach_stale_source_notice(result)
         logger.info(
             "answer_question route=%s mode=%s total_ms=%s stale=%s",
@@ -176,6 +177,7 @@ def stream_answer(question: str) -> Iterator[str]:
                     "latency_ms": round((time.perf_counter() - t0) * 1000),
                 },
             )
+            attach_coords(result.projects, store.dataframe)
             attach_stale_source_notice(result)
             yield _sse({"type": "done", **result.model_dump()})
             return
@@ -193,6 +195,7 @@ def stream_answer(question: str) -> Iterator[str]:
     result.meta["generate_ms"] = round((time.perf_counter() - t_gen) * 1000)
     result.meta["ttft_ms"] = first_token_ms
     result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+    attach_coords(result.projects, store.dataframe)
     attach_stale_source_notice(result)
     yield _sse({"type": "done", **result.model_dump()})
 
