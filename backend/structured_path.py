@@ -16,6 +16,22 @@ STATUS_MAP = {
     "rezoning": "rezoning",
 }
 
+# Generic words to skip when hunting for the location term in a question, so a
+# query like "how many projects at Coconut Point" filters on the place, not on
+# the noun "projects". Statuses (approved/denied/…) are already applied as
+# explicit filters above, so they're skipped here too.
+_LOCATION_STOPWORDS = {
+    "how", "many", "what", "were", "was", "the", "show", "list", "estero",
+    "project", "projects", "decision", "decisions", "record", "records",
+    "meeting", "meetings", "development", "developments", "happening", "there",
+    "about", "tell", "give", "have", "with", "near", "around", "along",
+    "approved", "denied", "continued", "rezoning", "status", "update", "updates",
+}
+
+
+def _location_tokens(q: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z]{4,}", q) if t not in _LOCATION_STOPWORDS]
+
 
 def _clip_at_sentence(text: str, max_len: int = 480) -> str:
     """Hard-cap display length without mid-word/mid-sentence cuts when possible."""
@@ -30,6 +46,17 @@ def _clip_at_sentence(text: str, max_len: int = 480) -> str:
     if space >= max_len // 2:
         return chunk[:space].rstrip(",;: ") + "…"
     return chunk.rstrip() + "…"
+
+
+def _to_coord(value) -> float | None:
+    """Parse a lat/lng cell to a float, treating blanks and 0/NaN as missing."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num != num or num == 0.0:  # NaN or an unset 0,0 placeholder
+        return None
+    return num
 
 
 def _row_to_project(row: dict) -> ProjectOut:
@@ -51,7 +78,47 @@ def _row_to_project(row: dict) -> ProjectOut:
         status=status,
         date=row_value(row, "meeting_date"),
         document_url=row_value(row, "document_url"),
+        lat=_to_coord(row_value(row, "latitude")),
+        lng=_to_coord(row_value(row, "longitude")),
     )
+
+
+def attach_coords(projects: list[ProjectOut], df: pd.DataFrame) -> None:
+    """Backfill lat/lng on projects that don't already have them (RAG results,
+    whose fields come from the LLM, not a dataframe row). Matches a project to a
+    source record by application id first, then exact document URL, then title,
+    and copies that record's coordinates. Mutates *projects* in place.
+    """
+    if df is None or df.empty:
+        return
+    needing = [p for p in projects if p.lat is None or p.lng is None]
+    if not needing:
+        return
+    rows = df.to_dict(orient="records")
+    by_id: dict[str, dict] = {}
+    by_url: dict[str, dict] = {}
+    by_title: dict[str, dict] = {}
+    for row in rows:
+        lat, lng = _to_coord(row_value(row, "latitude")), _to_coord(row_value(row, "longitude"))
+        if lat is None or lng is None:
+            continue
+        for index, key in (
+            (by_id, row_value(row, "application_id")),
+            (by_url, row_value(row, "document_url")),
+            (by_title, row_value(row, "project_name")),
+        ):
+            key = (key or "").strip().lower()
+            if key:
+                index.setdefault(key, row)
+    for project in needing:
+        match = (
+            by_id.get((project.id or "").strip().lower())
+            or by_url.get((project.document_url or "").strip().lower())
+            or by_title.get((project.title or "").strip().lower())
+        )
+        if match:
+            project.lat = _to_coord(row_value(match, "latitude"))
+            project.lng = _to_coord(row_value(match, "longitude"))
 
 
 def _apply_filters(df: pd.DataFrame, question: str) -> pd.DataFrame:
@@ -75,9 +142,7 @@ def _apply_filters(df: pd.DataFrame, question: str) -> pd.DataFrame:
                 out = out[out[col].astype(str).str.contains("rezon", case=False, na=False)]
                 break
     # street / location token
-    for token in re.findall(r"[a-z]{4,}", q):
-        if token in {"how", "many", "what", "were", "was", "the", "show", "list", "estero"}:
-            continue
+    for token in _location_tokens(q):
         mask = pd.Series(False, index=out.index)
         for key in ("location", "project_name", "summary"):
             col = pick_column(out, key)
