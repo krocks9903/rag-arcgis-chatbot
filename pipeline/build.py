@@ -24,6 +24,8 @@ from eaglegis.config import (
     SITE_TEXT_LOCATION_OVERRIDES,
     normalize_location_type,
 )
+from eaglegis.gazetteer import apply_gazetteer
+from eaglegis.location_propagation import propagate_locations
 from eaglegis.location_resolver import LocationReference, LocationResolver
 from eaglegis.extractors import (
     extract_agenda_entries,
@@ -1110,6 +1112,18 @@ class NormalizedBuilder:
 
     def write(self, out_dir: Path) -> None:
         self._finalize_projects()
+        # Gap-fillers, in order. Both only touch items with no resolved point, so
+        # neither can move a location the resolver already produced.
+        #  1) Curated gazetteer of named developments/roads.
+        #  2) Inherit a point across items sharing a project/application ID.
+        gazetteered = apply_gazetteer(self.agenda_items, self.locations_v2)
+        if gazetteered:
+            print(f"Gazetteer: +{gazetteered} named-site item locations")
+        propagated = propagate_locations(
+            self.agenda_items, self.locations_v2, self.agenda_item_projects
+        )
+        if propagated:
+            print(f"Location propagation: +{propagated} inherited item locations")
         # Medallion layout, matching the legacy EagleGIS repo's bronze/silver/
         # gold tiers (and the consumer contract in rag-arcgis-chatbot's
         # sync-data.yml, which pulls gold/meetings_ai_public.csv):
