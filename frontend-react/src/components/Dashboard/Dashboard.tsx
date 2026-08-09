@@ -1,7 +1,9 @@
 import type { Meeting } from "../../types";
 import NextMeetings from "./NextMeetings";
 import LatestNews from "./LatestNews";
-import RecentDecisions from "./RecentDecisions";
+// RecentDecisions replaced by UpcomingEvents below — component kept in case
+// we bring it back, just not rendered.
+import UpcomingEvents from "./UpcomingEvents";
 
 interface DashboardProps {
   meetings: Meeting[];
@@ -10,12 +12,12 @@ interface DashboardProps {
   onSend: (text: string) => void;
 }
 
-export default function Dashboard({ meetings, meetingsLoading, meetingsError, onSend }: DashboardProps) {
+export default function Dashboard({ meetings, meetingsLoading, meetingsError, onSend: _onSend }: DashboardProps) {
   return (
     <div id="pulse-dashboard">
       <NextMeetings meetings={meetings} loading={meetingsLoading} error={meetingsError} />
       <LatestNews />
-      <RecentDecisions onSend={onSend} />
+      <UpcomingEvents />
     </div>
   );
 }

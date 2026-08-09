@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import traceback
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -15,9 +16,11 @@ from typing import Optional
 
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_groq import ChatGroq
 
 import ingest
+from events import router as events_router
+from llm_provider import generate
+from reranker import get_reranker, rerank
 from schema_aliases import row_value
 
 app = FastAPI(title="Estero Development Chatbot API")
@@ -30,22 +33,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(events_router)
+
 vectorstore = None
-llm = None
 _embeddings = None
 board_df: "pd.DataFrame | None" = None
 
 BOARD_CSV = "data/data.csv"
 WEBSITE_CSV = "data/esterotoday_content.csv"
+VILLAGE_COUNCIL_CSV = "data/meetings_ai_public.csv"
 INDEX_DIR = "faiss_index"
 MANIFEST_FILE = os.path.join(INDEX_DIR, "manifest.json")
 
 # Bump this whenever the chunk schema/metadata shape changes so cached indexes
 # from before the change are treated as stale and rebuilt.
-CACHE_VERSION = "v3-geocoords"
+CACHE_VERSION = "v4-village-council"
 
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.35"))
 RETRIEVE_K = int(os.getenv("RETRIEVE_K", "12"))
+
+# Cross-encoder reranking (see reranker.py). Set RERANK_ENABLED=false for an
+# instant rollback to pre-rerank behavior — with it false, retrieve() and
+# answer_question() are byte-identical to the original top-RETRIEVE_K flow.
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() not in {"0", "false", "no"}
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "20"))
+RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "5"))
 
 
 class ChatRequest(BaseModel):
@@ -85,13 +97,13 @@ def _csv_digest(*paths: str) -> str:
     return h.hexdigest()
 
 
-def build_rag_chain(board_csv: str = BOARD_CSV, website_csv: str = WEBSITE_CSV):
-    global vectorstore, llm, board_df
+def build_rag_chain(board_csv: str = BOARD_CSV, website_csv: str = WEBSITE_CSV, vc_csv: str = VILLAGE_COUNCIL_CSV):
+    global vectorstore, board_df
 
     if os.path.exists(board_csv):
         board_df = pd.read_csv(board_csv, encoding="utf-8")
 
-    digest = _csv_digest(board_csv, website_csv)
+    digest = _csv_digest(board_csv, website_csv, vc_csv)
     manifest = {}
     if os.path.exists(MANIFEST_FILE):
         with open(MANIFEST_FILE, encoding="utf-8") as f:
@@ -104,7 +116,7 @@ def build_rag_chain(board_csv: str = BOARD_CSV, website_csv: str = WEBSITE_CSV):
         vectorstore = FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
     else:
         print("Building chunks from CSV sources…")
-        docs = ingest.build_documents(board_csv, website_csv)
+        docs = ingest.build_documents(board_csv, website_csv, vc_csv)
         if not docs:
             raise ValueError("No data files found in data/ folder")
         print(f"Indexing {len(docs)} chunks…")
@@ -119,16 +131,14 @@ def build_rag_chain(board_csv: str = BOARD_CSV, website_csv: str = WEBSITE_CSV):
             )
         print("FAISS index built and saved.")
 
-    groq_key = os.getenv("GROQ_API_KEY")
-    if not groq_key:
-        raise ValueError("Set GROQ_API_KEY in your .env file")
+    # LLM generation no longer goes through a client built here — llm_provider
+    # validates LLM_PROVIDER and constructs the selected provider's client
+    # once at import time (see llm_provider.py). If that failed, this module
+    # itself would never have finished importing.
 
-    llm = ChatGroq(
-        model="llama-3.1-8b-instant",
-        groq_api_key=groq_key,
-        temperature=0.1,
-        max_tokens=1200,
-    )
+    if RERANK_ENABLED:
+        get_reranker()  # load once at startup, not on the first request
+
     print("RAG backend ready.")
 
 
@@ -137,14 +147,24 @@ def build_rag_chain(board_csv: str = BOARD_CSV, website_csv: str = WEBSITE_CSV):
 # ─────────────────────────────────────────────
 def _dedupe_key(doc) -> tuple:
     md = doc.metadata
-    if md.get("source_type") == "board_record":
+    source_type = md.get("source_type")
+    if source_type == "board_record":
         return ("board", md.get("record_id"))
+    if source_type == "village_council":
+        return ("village_council", md.get("record_id"))
     return ("article", md.get("url"))
 
 
 def retrieve(question: str) -> list[tuple]:
-    """Dense search, deduped to one hit per underlying record/article, best-first."""
-    hits = vectorstore.similarity_search_with_relevance_scores(question, k=RETRIEVE_K)
+    """Dense search, deduped to one hit per underlying record/article, best-first.
+
+    Pulls a wider candidate pool (RERANK_CANDIDATES) when reranking is
+    enabled, since the correct chunk on generic queries is usually in the
+    top-20 dense hits but not top-12 — see answer_question() for the rerank
+    step that reorders this pool afterward.
+    """
+    k = RERANK_CANDIDATES if RERANK_ENABLED else RETRIEVE_K
+    hits = vectorstore.similarity_search_with_relevance_scores(question, k=k)
     hits.sort(key=lambda x: x[1], reverse=True)
     seen: set[tuple] = set()
     deduped = []
@@ -212,6 +232,22 @@ def _board_card(md: dict) -> dict:
     }
 
 
+def _village_council_card(md: dict) -> dict:
+    return {
+        "source_type": "village_council",
+        "title": md.get("project_name") or None,
+        "location": md.get("location") or None,
+        "document_url": md.get("primary_source_url") or None,
+        "pdf_url": md.get("primary_source_url") or None,
+        "pdf_name": md.get("source_filename") or None,
+        "application_id": md.get("application_id") or None,
+        "meeting_date": md.get("meeting_date") or None,
+        "lat": md.get("lat"),
+        "lng": md.get("lng"),
+        "status": (md.get("outcome") or "")[:80] or None,
+    }
+
+
 def _article_card(doc) -> dict:
     md = doc.metadata
     excerpt = ingest.strip_header_lines(doc.page_content)
@@ -229,47 +265,54 @@ def _article_card(doc) -> dict:
 def build_card(passing: list[tuple]) -> Optional[dict]:
     """Only ever build a card from verified chunk metadata — never from LLM text.
 
-    A board card requires the *top-scoring* passing chunk to be a board_record
-    with a real RecordId. Anything else (top chunk is an article, or a board
-    chunk with no RecordId) falls through to an article card, and if nothing
-    passing is a linkable article either, no card is emitted at all.
+    A board/village-council card requires the *top-scoring* passing chunk to
+    be that source type with a real RecordId. Anything else (top chunk is an
+    article, or a record chunk with no RecordId) falls through to an article
+    card, and if nothing passing is a linkable article either, no card is
+    emitted at all.
     """
     if not passing:
         return None
     top_doc, _ = passing[0]
-    if top_doc.metadata.get("source_type") == "board_record" and top_doc.metadata.get("record_id"):
+    top_type = top_doc.metadata.get("source_type")
+    if top_type == "board_record" and top_doc.metadata.get("record_id"):
         return _board_card(top_doc.metadata)
+    if top_type == "village_council" and top_doc.metadata.get("record_id"):
+        return _village_council_card(top_doc.metadata)
     for doc, _ in passing:
         if doc.metadata.get("source_type") == "website_article" and doc.metadata.get("url"):
             return _article_card(doc)
     return None
 
 
-PROSE_PROMPT = """You are the assistant for Engage Estero, a community organization in Estero, Florida. You help residents understand local developments using two sources: official Planning Zoning & Design Board records, and EsteroToday.com news articles.
-
-Use ONLY the context below. Never invent URLs, dates, or facts.
-
-Each context block starts with "DATE: YYYY-MM-DD" (when that source was decided or published) and "SOURCE_TYPE:" (board_record or website_article).
+# System turn: static identity + hard rules, rewritten for a stronger
+# instruction-following model (Claude Haiku 4.5) — see llm_provider.py.
+# {today}/{six_months_ago} are filled in per-request since the rules
+# reference "today", not because the text itself changes call to call.
+SYSTEM_PROMPT = """You are the assistant for Engage Estero, a community organization in Estero, Florida. You help residents understand local developments using Planning Zoning & Design Board records, Village Council records, and EsteroToday.com news articles.
 
 Today's date is {today}.
 
-FORMAT AND ACCURACY RULES — follow exactly:
-1. Answer in clear plain English. Use short paragraphs. Use **bold** for project names.
-2. If multiple projects/topics match, use a numbered list with one line of detail each. NEVER merge facts from one project into another — every fact you state must come from the same context block as the project it describes.
-3. If two context blocks disagree, treat the one with the most recent DATE as current, and explicitly note that an earlier source said something different.
-4. Every time-sensitive claim must be attributed to its source date, e.g. "As of {today_month_year}, ..." or "A March 2021 article reported...".
-5. Do NOT use the words "yet", "currently", "still", "so far", or "to date" unless the context block supporting that claim has a DATE on or after {six_months_ago} (six months before today). Older claims must be phrased in the past tense with their date instead, e.g. "As of March 2021, work had not yet begun" rather than "work has not started yet".
-6. Only mention a project if a context block actually describes it in enough detail to summarize. Do not pad the answer with items you cannot support from the context — every bullet or sentence must be traceable to a specific context block.
-7. Never write meta-sentences like "Based on the provided context", "Here is a summary", "The most relevant item is". Start directly with the substance.
-8. If nothing in the context is relevant to the question, say plainly that you don't have reliable records on the topic. Do not guess.
-9. Do not end your answer with a JSON block or any code fence of any kind. A separate system attaches structured card data automatically — your job is prose only.
+Each context block starts with header lines (DATE:, SOURCE_TYPE:, sometimes TRUE_URL:, SEARCH:) — retrieval aids for you only. Never quote or echo the literal text "DATE:", "SOURCE_TYPE:", "TRUE_URL:", or "SEARCH:" in your answer.
 
-Context:
-{context}
+Hard rules — follow exactly:
+1. Answer ONLY from the context blocks below. If the context lacks the answer, say so plainly. Never speculate or fill gaps with outside knowledge.
+2. Never invent a URL, date, motion outcome, vote count, or board name. If a block has a TRUE_URL line, use that value verbatim for any link. Never construct or guess a URL.
+3. Cite the ApplicationId shown in a context block (its record identifier, e.g. "ApplicationId: 12345") for every project fact, whenever provided.
+4. If one block covers multiple projects, use only the section matching the resident's question. Never blend facts from a different project in.
+5. Every fact must trace to a specific context block. Do not pad the answer with anything you cannot support from the context.
+6. If two blocks disagree, treat the one with the more recent DATE as current, and note the earlier source said something different.
+7. Attribute time-sensitive claims to their source date ("As of March 2021..."). Don't say "currently" or "still" for a claim dated before {six_months_ago} — use past tense with the date instead.
+8. Write plain English in short paragraphs. **Bold** project names; use a numbered list for multiple matches. No meta-commentary. Start with the substance.
+9. Never output a JSON block or code fence — a separate system attaches card data automatically."""
 
-Resident Question: {question}
+# User turn: the actual question first (so a truncated preview of this
+# string — used for usage-log query previews, see llm_provider.py — shows
+# the real question), then the retrieved context.
+USER_PROMPT = """Resident question: {question}
 
-Answer:"""
+Context blocks:
+{context}"""
 
 _STRAY_FENCE_RE = re.compile(r"```(?:json)?[\s\S]*?```", re.IGNORECASE)
 
@@ -282,22 +325,34 @@ def answer_question(question: str) -> "ChatResponse":
         if keyword_hits:
             passing = keyword_hits[:6]
 
+    if RERANK_ENABLED and passing:
+        # Reorder the dense-qualified candidates with the cross-encoder so the
+        # correct board/village-council chunk can beat a larger, phrase-rich
+        # article corpus on generic phrasing. Original dense scores are kept
+        # (not replaced by rerank scores) so SCORE_THRESHOLD semantics upstream
+        # are unaffected — only the order (and count, truncated to
+        # RERANK_TOP_N) of `passing` changes.
+        docs_only = [d for d, _ in passing]
+        dense_score_by_id = {id(d): s for d, s in passing}
+        t0 = time.perf_counter()
+        reranked_docs = rerank(question, docs_only, top_n=RERANK_TOP_N)
+        print(f"Rerank step: {time.perf_counter() - t0:.3f}s total ({len(docs_only)} -> {len(reranked_docs)})")
+        passing = [(d, dense_score_by_id[id(d)]) for d in reranked_docs]
+
     if passing:
         context = "\n\n---\n\n".join(doc.page_content for doc, _ in passing)
     else:
         context = "No context passed the relevance threshold for this question. There is nothing reliable to report."
 
     today_dt = datetime.now()
-    prompt = PROSE_PROMPT.format(
+    system_prompt = SYSTEM_PROMPT.format(
         today=today_dt.strftime("%B %d, %Y"),
-        today_month_year=today_dt.strftime("%B %Y"),
         six_months_ago=(today_dt - timedelta(days=182)).strftime("%Y-%m-%d"),
-        context=context,
-        question=question,
     )
+    user_prompt = USER_PROMPT.format(context=context, question=question)
 
-    response = llm.invoke(prompt)
-    prose = response.content.strip()
+    result = generate(system=system_prompt, user=user_prompt, max_tokens=1200)
+    prose = result.text.strip()
     if "Answer:" in prose:
         prose = prose.split("Answer:")[-1].strip()
     # Safety net: cards are built from metadata below, never from the LLM —
@@ -312,7 +367,12 @@ def answer_question(question: str) -> "ChatResponse":
     sources = []
     for doc, _ in passing[:4]:
         label = doc.metadata.get("source_type", "record")
-        prefix = "📰 " if label == "website_article" else "🏛 "
+        if label == "website_article":
+            prefix = "📰 "
+        elif label == "village_council":
+            prefix = "🏘️ "
+        else:
+            prefix = "🏛 "
         snippet = ingest.strip_header_lines(doc.page_content)[:280]
         src = prefix + snippet
         if src not in sources:
@@ -344,7 +404,7 @@ async def load_csv(req: LoadRequest):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    if vectorstore is None or llm is None:
+    if vectorstore is None:
         raise HTTPException(status_code=503, detail="No data loaded yet.")
     try:
         return answer_question(req.question)
@@ -354,7 +414,10 @@ async def chat(req: ChatRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "index_loaded": vectorstore is not None and llm is not None}
+    # LLM readiness is no longer a runtime toggle here: llm_provider validates
+    # LLM_PROVIDER and constructs its client at import time, so if this
+    # process is running at all, the LLM provider is already ready.
+    return {"status": "ok", "index_loaded": vectorstore is not None}
 
 
 @app.get("/recent-decisions")

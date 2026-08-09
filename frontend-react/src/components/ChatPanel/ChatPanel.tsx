@@ -1,7 +1,6 @@
 import type { ChatMessage } from "../../types";
 import Hero from "./Hero";
 import MessageList from "./MessageList";
-import DatasetBar from "./DatasetBar";
 import ChatInput from "./ChatInput";
 
 interface ChatPanelProps {
@@ -15,8 +14,10 @@ export default function ChatPanel({ messages, onSend, disabled }: ChatPanelProps
 
   return (
     <section id="chat-panel">
-      {started ? <MessageList messages={messages} /> : <Hero onChipClick={onSend} />}
-      <DatasetBar />
+      {started ? <MessageList messages={messages} /> : <Hero />}
+      {/* DatasetBar (Load CSV) intentionally hidden — the dataset already loads
+          at backend startup. Component and POST /load left in place; see
+          DatasetBar.tsx to re-enable. */}
       <ChatInput onSend={onSend} disabled={disabled} />
     </section>
   );

@@ -5,6 +5,7 @@ import type { ChatMessage } from "../../types";
 import { isArticle } from "../../lib/parseAnswer";
 import ProjectCard from "./ProjectCard";
 import ArticleCard from "./ArticleCard";
+import VillageCouncilCard from "./VillageCouncilCard";
 import SourcesList from "./SourcesList";
 import TypingIndicator from "./TypingIndicator";
 
@@ -53,7 +54,15 @@ export default function Message({ message }: { message: ChatMessage }) {
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.prose}</ReactMarkdown>
             </div>
           )}
-          {cards.map((c, i) => (isArticle(c) ? <ArticleCard key={i} card={c} /> : <ProjectCard key={i} card={c} />))}
+          {cards.map((c, i) =>
+            isArticle(c) ? (
+              <ArticleCard key={i} card={c} />
+            ) : c.sourceType === "village_council" ? (
+              <VillageCouncilCard key={i} card={c} />
+            ) : (
+              <ProjectCard key={i} card={c} />
+            ),
+          )}
           {finished && !hasContent && !message.error && <div>Sorry, I couldn't find an answer.</div>}
           {finished && <SourcesList sources={message.sources || []} />}
           {finished && message.prose && (

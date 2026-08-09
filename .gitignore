@@ -9,6 +9,10 @@ venv/
 # Vector store index (rebuilt on startup)
 faiss_index/
 
+# Per-call LLM usage log (backend/llm_provider.py) — runtime data, grows
+# forever, never something to commit.
+backend/logs/
+
 # Data files (add your own)
 data/*.csv
 !data/data.csv

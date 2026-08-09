@@ -95,6 +95,12 @@ def board_documents(df: pd.DataFrame) -> list[Document]:
             # board card out of thin air.
             continue
 
+        if _nonempty(fields.get("SourceBoard")).lower() == "council":
+            # Village Council rows in data.csv are superseded by the reviewed,
+            # geocoded vc: records in village_council_documents() — indexing
+            # both would surface the same real meeting as two different cards.
+            continue
+
         application_id = row_value(fields, "application_id")
         title = clean_project_title(row_value(fields, "project_name") or row_value(fields, "summary"))
         location = row_value(fields, "location")
@@ -142,6 +148,105 @@ def board_documents(df: pd.DataFrame) -> list[Document]:
         for piece in _chunk_pieces(header, body):
             docs.append(Document(page_content=piece, metadata=metadata))
     return docs
+
+
+# ─────────────────────────────────────────────
+# Village Council records (meetings_ai_public.csv, SourceBoard=vc)
+# ─────────────────────────────────────────────
+def village_council_documents(df: pd.DataFrame) -> tuple[list[Document], dict[str, int]]:
+    """Village Council agenda items.
+
+    RecordType (AgendaItem vs AgendaItemLocation) is NOT a parent/child split
+    in this data — verified by checking for a shared (MeetingId, ItemId) or
+    (MeetingId, AgendaItemNumber) key, and there is none. Each row is already
+    a standalone, complete agenda item; AgendaItemLocation rows simply carry
+    their own lat/lng because that particular item was geocoded. So each row
+    that passes the filters below is embedded on its own, with no join step.
+    """
+    docs: list[Document] = []
+    seen_keys: set[tuple] = set()
+    stats = {
+        "skipped_not_vc": 0,
+        "skipped_not_ai_ready": 0,
+        "skipped_no_record_id": 0,
+        "skipped_duplicate_key": 0,
+        "embedded": 0,
+    }
+    for _, row in df.iterrows():
+        fields = {k: ("" if pd.isna(v) else v) for k, v in row.to_dict().items()}
+
+        if _nonempty(fields.get("SourceBoard")).lower() != "vc":
+            stats["skipped_not_vc"] += 1
+            continue
+        if fields.get("AiReady") is not True:
+            stats["skipped_not_ai_ready"] += 1
+            continue
+
+        record_id = _nonempty(fields.get("RecordId"))
+        if not record_id:
+            stats["skipped_no_record_id"] += 1
+            continue
+
+        key = (_nonempty(fields.get("MeetingId")), _nonempty(fields.get("ItemId")))
+        if key in seen_keys:
+            stats["skipped_duplicate_key"] += 1
+            continue
+        seen_keys.add(key)
+
+        title = clean_project_title(row_value(fields, "project_name") or row_value(fields, "summary"))
+        applicant = row_value(fields, "applicant_name")
+        application_id = row_value(fields, "application_id")
+        location = row_value(fields, "location")
+        outcome = row_value(fields, "outcome", "action_taken", "status")
+        meeting_date = row_value(fields, "meeting_date")
+        primary_source_url = _nonempty(fields.get("PrimarySourceUrl"))
+        source_filename = _nonempty(fields.get("SourceFilename"))
+        summary = row_value(fields, "summary")
+        lat = _to_float(row_value(fields, "latitude"))
+        lng = _to_float(row_value(fields, "longitude"))
+
+        metadata = {
+            "source_type": "village_council",
+            "record_id": record_id,
+            "application_id": application_id,
+            "project_name": title,
+            "location": location,
+            "outcome": outcome,
+            "meeting_date": meeting_date,
+            "date": meeting_date,
+            "primary_source_url": primary_source_url,
+            "source_filename": source_filename,
+            "lat": lat,
+            "lng": lng,
+            "chunk_id": f"vc-{record_id}",
+        }
+
+        date_header = f"DATE: {meeting_date}" if meeting_date else "DATE: unknown"
+        search_header = "SEARCH: " + " | ".join(
+            filter(None, [title, applicant, application_id, location, meeting_date])
+        )
+        header_lines = [date_header, "SOURCE_TYPE: village_council"]
+        if primary_source_url:
+            header_lines.append(f"TRUE_URL: {primary_source_url}")
+        header_lines.append(search_header)
+        header = "\n".join(header_lines)
+
+        body_lines = [
+            f"ProjectName: {title}",
+            f"ApplicantName: {applicant}",
+            f"ApplicationId: {application_id}",
+            f"Location: {location}",
+            f"MeetingDate: {meeting_date}",
+            f"Outcome: {outcome}",
+        ]
+        if summary:
+            body_lines.append(f"Summary: {summary}")
+        body = "\n".join(line for line in body_lines if line.split(": ", 1)[-1])
+
+        for piece in _chunk_pieces(header, body):
+            docs.append(Document(page_content=piece, metadata=metadata))
+        stats["embedded"] += 1
+    return docs, stats
 
 
 # ─────────────────────────────────────────────
@@ -201,7 +306,7 @@ def article_documents(df: pd.DataFrame) -> list[Document]:
     return docs
 
 
-def build_documents(board_csv: str, website_csv: str) -> list[Document]:
+def build_documents(board_csv: str, website_csv: str, village_council_csv: str | None = None) -> list[Document]:
     docs: list[Document] = []
     if os.path.exists(board_csv):
         board_df = pd.read_csv(board_csv, encoding="utf-8")
@@ -218,5 +323,13 @@ def build_documents(board_csv: str, website_csv: str) -> list[Document]:
         print(f"  {len(article_docs)} article chunks from {len(website_df)} rows")
     else:
         print(f"  Website CSV not found: {website_csv} (skipping)")
+
+    if village_council_csv and os.path.exists(village_council_csv):
+        vc_df = pd.read_csv(village_council_csv, encoding="utf-8")
+        vc_docs, vc_stats = village_council_documents(vc_df)
+        docs.extend(vc_docs)
+        print(f"  {len(vc_docs)} village council chunks from {len(vc_df)} rows ({vc_stats})")
+    elif village_council_csv:
+        print(f"  Village Council CSV not found: {village_council_csv} (skipping)")
 
     return docs

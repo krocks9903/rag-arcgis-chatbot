@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState } from "react";
-import WebMap from "@arcgis/core/WebMap";
-import MapView from "@arcgis/core/views/MapView";
-import Home from "@arcgis/core/widgets/Home";
-import Zoom from "@arcgis/core/widgets/Zoom";
-import Search from "@arcgis/core/widgets/Search";
-import type FeatureLayer from "@arcgis/core/layers/FeatureLayer";
-import "@arcgis/core/assets/esri/themes/light/main.css";
+import { useEffect, useState } from "react";
 import { setMapView } from "../../lib/mapViewStore";
 
-const PORTAL_ITEM_ID = "93eef5bd592f48b4a04e20815dba13b6";
+// Esri "Nearby" Instant App wrapping webmap 84a56d2f741d49f5a70c547923fb45d5
+// (same webmap this panel used to load directly via the JS SDK). Embedding
+// the hosted app itself — not the raw webmap — was a deliberate choice: it
+// picks up the app's own theme/search config, at the cost of native SDK
+// control. See mapViewStore.ts: every pan/capture/restore call there already
+// no-ops safely when there's no live MapView (setMapView is never called
+// here), so "Show on map" on a chat card still switches to this tab, it just
+// can't zoom to the specific coordinates inside an opaque cross-origin iframe.
+const INSTANT_APP_ID = "90d68fdd2de841b295cc1c3cfd6df524";
+const INSTANT_APP_URL = `https://eccl-swfl-safety.maps.arcgis.com/apps/instant/nearby/index.html?appid=${INSTANT_APP_ID}`;
+
+// The app's underlying feature layer is public on its own, so the record
+// count in TopBar ("Live data · N records") can still be queried directly —
+// no need to lose that just because the map itself moved into an iframe.
+const RECORD_COUNT_URL =
+  "https://services2.arcgis.com/UzlfiFv8kzq0Q4vo/arcgis/rest/services/Estero_Board_Records_%E2%80%94_All_Categories/FeatureServer/0/query?where=1%3D1&returnCountOnly=true&f=json";
 
 interface MapPanelProps {
   expanded: boolean;
@@ -16,54 +24,31 @@ interface MapPanelProps {
   onRecordCount: (count: number | null) => void;
 }
 
-// MapView (v5 @arcgis/core) watches its container with a ResizeObserver and
-// resizes itself automatically — no manual view.resize() call needed when
-// the grid-template-columns transition changes the container's width.
-
 export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: MapPanelProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const viewRef = useRef<MapView | null>(null);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    // No live MapView to hand out from an iframe — clear any stale reference
+    // so "Show on map" etc. degrade to their already-safe no-op path.
+    setMapView(null);
+
     let cancelled = false;
-
-    const webmap = new WebMap({ portalItem: { id: PORTAL_ITEM_ID } });
-    const view = new MapView({ container: containerRef.current, map: webmap, ui: { components: [] } });
-    view.ui.add(new Zoom({ view }), "top-left");
-    view.ui.add(new Home({ view }), "top-left");
-    view.ui.add(new Search({ view }), "top-right");
-    viewRef.current = view;
-    setMapView(view);
-
-    webmap
-      .when(() => {
-        if (cancelled) return;
-        setLoadError(false);
-        const featureLayers = webmap.layers.toArray().filter((l) => l.type === "feature") as FeatureLayer[];
-        let total = 0;
-        const loads = featureLayers.map((l) =>
-          l.load().then(() => l.queryFeatureCount().then((n) => { total += n; })),
-        );
-        Promise.all(loads)
-          .then(() => { if (!cancelled) onRecordCount(total); })
-          .catch(() => { if (!cancelled) onRecordCount(null); });
+    fetch(RECORD_COUNT_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{ count?: number; error?: unknown }>;
       })
-      .catch((err: unknown) => {
-        // In StrictMode dev, the first mount is deliberately torn down mid-load
-        // (view.destroy() below aborts the in-flight request) — that's expected
-        // and not a real failure, so only surface errors from the live mount.
+      .then((data) => {
         if (cancelled) return;
-        console.error("Failed to load web map:", err);
-        setLoadError(true);
+        if (typeof data.count === "number") onRecordCount(data.count);
+        else onRecordCount(null);
+      })
+      .catch(() => {
+        if (!cancelled) onRecordCount(null);
       });
 
     return () => {
       cancelled = true;
-      setMapView(null);
-      viewRef.current = null;
-      view.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -82,31 +67,32 @@ export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: Ma
           <button type="button" className="map-btn" id="expand-btn" onClick={onToggleExpand}>
             {expanded ? "⤡ Collapse" : "⤢ Expand"}
           </button>
-          <a
-            className="map-btn"
-            href={`https://www.arcgis.com/apps/mapviewer/index.html?webmap=${PORTAL_ITEM_ID}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
+          <a className="map-btn" href={INSTANT_APP_URL} target="_blank" rel="noopener noreferrer">
             ↗ Open
           </a>
         </div>
       </div>
-      <div id="map-label">PZDB_Pilot</div>
+      <div id="map-label">Estero Board Records</div>
       {loadError && (
         <div id="map-error-banner" role="alert">
           ⚠️ The map failed to load.{" "}
-          <a
-            href={`https://www.arcgis.com/apps/mapviewer/index.html?webmap=${PORTAL_ITEM_ID}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
+          <a href={INSTANT_APP_URL} target="_blank" rel="noopener noreferrer">
             Open it directly on ArcGIS Online
           </a>
           .
         </div>
       )}
-      <div id="viewDiv" ref={containerRef} />
+      <iframe
+        id="viewDiv"
+        title="Estero Board Records map"
+        src={INSTANT_APP_URL}
+        // Cross-origin iframe: this can catch a hard network/navigation
+        // failure, but not an error the Esri app renders inside its own
+        // page — that's invisible to us. The "Open directly" link above is
+        // the real fallback for that case.
+        onError={() => setLoadError(true)}
+        style={{ border: "none", width: "100%", height: "100%" }}
+      />
       <div id="map-footer">
         <div id="map-footer-dot" />
         Powered by Esri · ArcGIS Online

@@ -1,4 +1,4 @@
-export type SourceType = "board_record" | "website_article";
+export type SourceType = "board_record" | "website_article" | "village_council";
 
 export interface NormalizedCard {
   sourceType: SourceType;
@@ -76,4 +76,35 @@ export interface RecentDecision {
   board: string | null;
   status: string | null;
   applicationId: string | null;
+}
+
+// Named CalendarEvent (not Event) to avoid shadowing the DOM's global Event type.
+export type EventCategory = "engage-estero" | "village";
+
+export interface CalendarEvent {
+  id: number;
+  title: string;
+  start: string; // local wall-clock datetime, e.g. "2026-08-18T16:30:00" (no offset)
+  end: string;
+  allDay: boolean;
+  venue: string | null;
+  url: string;
+  category: EventCategory;
+}
+
+/** Unified view of a single day's activity, merging /api/events (EsteroToday's
+ * Events Calendar feed) with public/meetings.json (the hand-maintained Village
+ * Council / PZDB schedule NextMeetings reads) — the mini calendar in
+ * UpcomingEvents renders dots/circles and the hover/click list from this, not
+ * from either source alone, so it never disagrees with Next Meetings. */
+export interface DayEvent {
+  source: "esterotoday" | "meeting";
+  id: string; // unique across both sources
+  dateKey: string; // YYYY-MM-DD
+  sortKey: string; // chronologically sortable string, for ordering same-day items
+  title: string;
+  time: string; // display string, e.g. "4:30 PM" or "All day"
+  venue: string | null;
+  url: string | null; // meetings.json entries have no article to link to
+  category: EventCategory;
 }

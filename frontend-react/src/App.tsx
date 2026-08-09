@@ -3,12 +3,10 @@ import TopBar from "./components/TopBar/TopBar";
 import ChatPanel from "./components/ChatPanel/ChatPanel";
 import RightPanel from "./components/RightPanel/RightPanel";
 import { useChat } from "./hooks/useChat";
-import { useHealth } from "./hooks/useHealth";
 import "./App.css";
 
 export default function App() {
   const { messages, send, newChat } = useChat();
-  const { status: healthStatus, retry: retryHealth } = useHealth();
   const [recordCount, setRecordCount] = useState<number | null | undefined>(undefined);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [mobileMapVisible, setMobileMapVisible] = useState(false);
@@ -23,8 +21,6 @@ export default function App() {
     <>
       <TopBar
         recordCount={recordCount}
-        healthStatus={healthStatus}
-        onRetryHealth={retryHealth}
         onNewChat={newChat}
         onToggleMobileMap={toggleMobileMap}
       />

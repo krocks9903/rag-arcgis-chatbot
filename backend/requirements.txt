@@ -16,9 +16,16 @@ faiss-cpu==1.14.3
 # HuggingFace Hub
 huggingface-hub==0.23.4
 
-# Groq and HuggingFace integrations
+# LLM providers — Anthropic is the default (see backend/llm_provider.py);
+# Groq remains available as a selectable fallback (LLM_PROVIDER=groq).
+anthropic==0.121.0
+groq==0.37.1
 langchain-groq>=0.1.0
 langchain-huggingface>=0.0.2
 
 # Data
 pandas>=2.2.3
+
+# EsteroToday.com article sync (backend/scripts/sync_esterotoday.py)
+requests==2.34.2
+beautifulsoup4==4.15.0
