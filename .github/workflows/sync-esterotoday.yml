@@ -1,0 +1,41 @@
+name: Sync EsteroToday articles
+
+on:
+  schedule:
+    # Mondays 12:00 UTC — an hour after sync-data.yml's EagleGIS pull, so the
+    # two data-sync workflows don't race pushing to the same branch.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Scrape new articles and open commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scraper dependencies
+        run: pip install requests==2.34.2 beautifulsoup4==4.15.0
+
+      - name: Scrape new EsteroToday.com articles
+        run: python backend/scripts/sync_esterotoday.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- backend/data/esterotoday_content.csv; then
+            echo "No new articles."
+            exit 0
+          fi
+          git add backend/data/esterotoday_content.csv
+          git commit -m "chore(data): sync new EsteroToday.com articles"
+          git push

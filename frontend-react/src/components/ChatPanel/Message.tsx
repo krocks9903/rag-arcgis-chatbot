@@ -5,6 +5,7 @@ import type { ChatMessage } from "../../types";
 import { isArticle } from "../../lib/parseAnswer";
 import ProjectCard from "./ProjectCard";
 import ArticleCard from "./ArticleCard";
+import VillageCouncilCard from "./VillageCouncilCard";
 import SourcesList from "./SourcesList";
 import TypingIndicator from "./TypingIndicator";
 import type { ReportPrefill } from "../ReportDialog/ReportDialog";
@@ -63,6 +64,8 @@ export default function Message({
           {cards.map((c, i) =>
             isArticle(c) ? (
               <ArticleCard key={i} card={c} />
+            ) : c.sourceType === "village_council" ? (
+              <VillageCouncilCard key={i} card={c} />
             ) : (
               <ProjectCard key={i} card={c} onReport={onReport} />
             ),

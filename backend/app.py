@@ -34,6 +34,7 @@ from models import (
     ReportOut,
     ReportStatusUpdate,
 )
+from events import router as events_router
 from orchestrator import answer_question, stream_answer
 from rate_limit import enforce_rate_limit
 from reports import create_report, list_reports, report_counts, update_report
@@ -116,6 +117,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(events_router)
 
 
 class StaticCacheMiddleware(BaseHTTPMiddleware):

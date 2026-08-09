@@ -10,6 +10,10 @@ venv/
 faiss_index/
 backend/faiss_index/
 
+# Per-call LLM usage log (backend/llm_provider.py) — runtime data, grows
+# forever, never something to commit.
+backend/logs/
+
 # Pipeline caches (Lee County API responses, pytest)
 .cache/
 .pytest_cache/
@@ -19,6 +23,10 @@ backend/faiss_index/
 # Runtime user reports (admin inbox)
 backend/data/ops/reports.json
 backend/data/ops/reports.json.tmp
+
+# Data files (add your own)
+data/*.csv
+!data/data.csv
 
 # OS
 .DS_Store

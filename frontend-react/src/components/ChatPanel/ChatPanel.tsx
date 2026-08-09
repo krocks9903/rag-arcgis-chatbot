@@ -16,7 +16,10 @@ export default function ChatPanel({ messages, onSend, disabled, onReport }: Chat
 
   return (
     <section id="chat-panel">
-      {started ? <MessageList messages={messages} onReport={onReport} /> : <Hero onChipClick={onSend} />}
+      {started ? <MessageList messages={messages} onReport={onReport} /> : <Hero />}
+      {/* DatasetBar (Load CSV) intentionally hidden — the dataset already loads
+          at backend startup. Component and POST /load left in place; see
+          DatasetBar.tsx to re-enable. */}
       <ChatInput onSend={onSend} disabled={disabled} />
     </section>
   );

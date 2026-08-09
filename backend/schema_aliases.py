@@ -23,6 +23,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "latitude": ("Latitude", "Lat"),
     "longitude": ("Longitude", "Lon", "Lng"),
     "board": ("Board", "SourceBoard"),
+    "applicant_name": ("ApplicantName",),
 }
 
 
