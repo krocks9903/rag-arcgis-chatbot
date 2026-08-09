@@ -1003,6 +1003,20 @@
   gap: 11px;
   align-items: center;
 }
+a.meeting-row-link {
+  text-decoration: none;
+  color: inherit;
+  border-radius: 10px;
+  padding: 6px 4px;
+  margin: -6px -4px;
+  transition: background 0.12s;
+}
+a.meeting-row-link:hover {
+  background: rgba(26, 51, 86, 0.06);
+}
+a.meeting-row-link:hover .meeting-name {
+  text-decoration: underline;
+}
 .date-leaf {
   width: 42px;
   height: 42px;

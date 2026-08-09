@@ -4,6 +4,7 @@ import { useMeetings } from "../../hooks/useMeetings";
 import { SkeletonRows } from "./Skeleton";
 import MiniCalendar from "./MiniCalendar";
 import type { CalendarEvent, DayEvent, Meeting } from "../../types";
+import { meetingSourceUrl } from "../../lib/meetingSource";
 
 function formatDateBadge(dateKey: string): { month: string; day: number } {
   const d = new Date(`${dateKey}T00:00:00`);
@@ -55,7 +56,7 @@ function meetingToDayEvent(m: Meeting): DayEvent {
     title: m.board,
     time: m.time,
     venue: m.venue,
-    url: null,
+    url: meetingSourceUrl(m),
     category: "village",
   };
 }

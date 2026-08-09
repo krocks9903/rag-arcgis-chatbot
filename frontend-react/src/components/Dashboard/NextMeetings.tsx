@@ -1,5 +1,6 @@
 import type { Meeting } from "../../types";
 import { meetingIsThisWeek } from "../../hooks/useMeetings";
+import { meetingSourceUrl } from "../../lib/meetingSource";
 import { SkeletonRows } from "./Skeleton";
 
 interface NextMeetingsProps {
@@ -34,21 +35,30 @@ export default function NextMeetings({ meetings, loading, error }: NextMeetingsP
         <ul className="meeting-list">
           {meetings.map((m) => {
             const { month, day } = formatMonthDay(m.date);
+            const href = meetingSourceUrl(m);
             return (
-              <li className="meeting-row" key={m.id}>
-                <div className="date-leaf">
-                  <span className="date-leaf-month">{month}</span>
-                  <span className="date-leaf-day">{day}</span>
-                </div>
-                <div className="meeting-info">
-                  <div className="meeting-name-row">
-                    <span className="meeting-name">{m.board}</span>
-                    {meetingIsThisWeek(m.date) && <span className="chip-thisweek">This week</span>}
+              <li key={m.id}>
+                <a
+                  className="meeting-row meeting-row-link"
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Open ${m.board} minutes on estero-fl.gov`}
+                >
+                  <div className="date-leaf">
+                    <span className="date-leaf-month">{month}</span>
+                    <span className="date-leaf-day">{day}</span>
                   </div>
-                  <div className="meeting-meta">
-                    {m.time} · {m.venue}
+                  <div className="meeting-info">
+                    <div className="meeting-name-row">
+                      <span className="meeting-name">{m.board}</span>
+                      {meetingIsThisWeek(m.date) && <span className="chip-thisweek">This week</span>}
+                    </div>
+                    <div className="meeting-meta">
+                      {m.time} · {m.venue}
+                    </div>
                   </div>
-                </div>
+                </a>
               </li>
             );
           })}

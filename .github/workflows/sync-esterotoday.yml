@@ -2,9 +2,9 @@ name: Sync EsteroToday articles
 
 on:
   schedule:
-    # Mondays 12:00 UTC — an hour after sync-data.yml's EagleGIS pull, so the
-    # two data-sync workflows don't race pushing to the same branch.
-    - cron: "0 12 * * 1"
+    # Friday 19:00 UTC — one hour after pipeline-refresh.yml's Friday scrape,
+    # so the two data-sync workflows don't race pushing to the same branch.
+    - cron: "0 19 * * 5"
   workflow_dispatch:
 
 permissions:

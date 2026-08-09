@@ -10,8 +10,9 @@ name: Refresh pipeline deliverables
 #   - On push of pipeline code (build.py, eaglegis/**, ...): the deliverables
 #     are a function of the code, so regenerate them here rather than making
 #     contributors rebuild + commit data by hand.
-#   - Weekly Monday 07:00 UTC: same flow without input changes; picks up
-#     upstream Lee County parcel changes in resolved coordinates.
+#   - Weekly Friday 18:00 UTC: Village posts next-week agendas/minutes on
+#     Fridays — scrape after that drop, then rebuild deliverables (also picks
+#     up Lee County parcel changes in resolved coordinates).
 #   - Manual dispatch from the Actions tab.
 #
 # Like the legacy refresh-data.yml, the weekly run is fully autonomous: it
@@ -45,7 +46,8 @@ on:
       - "pipeline/eaglegis/**"
       - "pipeline/requirements.txt"
   schedule:
-    - cron: "0 7 * * 1"
+    # Friday 18:00 UTC (~2pm Eastern) — after Village Friday minutes uploads.
+    - cron: "0 18 * * 5"
   workflow_dispatch:
 
 concurrency:
