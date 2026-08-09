@@ -1,5 +1,24 @@
-# Container image for the RAG ArcGIS chatbot (FastAPI + FAISS + Groq + static frontend).
+# Container image for Ask Engage Estero (FastAPI + FAISS + React UI).
 # Build from repo root: docker build -f backend/Dockerfile -t rag-arcgis-chatbot .
+#
+# The public UI is frontend-react (hero refresh, Pulse events, Instant App map).
+# Admin stays on the legacy vanilla pages, copied into the React dist.
+
+# ─── React production build ─────────────────────────────────────────────
+FROM node:22-alpine AS frontend-build
+WORKDIR /web
+COPY frontend-react/package.json frontend-react/package-lock.json ./
+RUN npm ci
+COPY frontend-react/ ./
+# Same-origin API when the SPA is served by FastAPI.
+ENV VITE_API_BASE=
+RUN npm run build
+
+# Admin console + assets (vanilla) — linked from /admin.html
+COPY frontend/admin.html frontend/admin.js frontend/admin.css frontend/styles.css frontend/config.js ./dist/
+COPY frontend/assets ./dist/assets
+
+# ─── API + baked index ──────────────────────────────────────────────────
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -18,7 +37,7 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
-COPY frontend/ /app/frontend
+COPY --from=frontend-build /web/dist /app/frontend
 
 # Pre-download models and bake FAISS + BM25 index for fast Cloud Run cold starts.
 RUN mkdir -p /app/backend/.cache/huggingface /app/backend/.cache/sentence-transformers \

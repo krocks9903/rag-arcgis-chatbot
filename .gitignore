@@ -39,3 +39,8 @@ Thumbs.db
 # Local eval / feedback artifacts (regeneratable or user-generated)
 backend/data/feedback/
 backend/data/eval_reports/
+
+# React build output / deps
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/.env.local

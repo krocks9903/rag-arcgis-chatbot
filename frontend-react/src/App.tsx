@@ -31,7 +31,6 @@ export default function App() {
         recordCount={recordCount}
         onNewChat={newChat}
         onToggleMobileMap={toggleMobileMap}
-        onReport={() => openReport()}
       />
       <div id="app" className={mapExpanded ? "map-expanded" : ""}>
         <ChatPanel messages={messages} onSend={send} disabled={busy} onReport={openReport} />

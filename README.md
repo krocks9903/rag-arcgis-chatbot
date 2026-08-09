@@ -19,9 +19,13 @@ copy backend\.env.example backend\.env   # add GROQ_API_KEY (and ADMIN_API_KEY)
 docker compose up --build
 ```
 
-- Frontend: http://localhost:3000  
-- API: http://localhost:8080/docs  
-- Admin: http://localhost:3000/admin.html  
+- Frontend (React): http://localhost:3000
+- API: http://localhost:8080/docs
+- Admin: http://localhost:3000/admin.html
+
+The Docker image and compose `web` service serve **`frontend-react`** (Pulse dashboard,
+hero refresh, Instant App map). The legacy vanilla files under `frontend/` remain for
+admin pages and as a reference.
 
 Full local + Google Cloud instructions: **[docs/DEPLOY_DOCKER.md](docs/DEPLOY_DOCKER.md)**
 

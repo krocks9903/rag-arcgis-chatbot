@@ -27,11 +27,12 @@ docker compose up --build
 
 | URL | Service |
 |-----|---------|
-| http://localhost:3000 | Frontend (nginx) |
+| http://localhost:3000 | React frontend (nginx) |
 | http://localhost:8080/health | API health |
 | http://localhost:8080/docs | Swagger UI |
+| http://localhost:3000/admin.html | Admin console |
 
-`frontend/config.js` points the UI at `http://localhost:8080`.
+Compose builds **`frontend-react`** (not the legacy vanilla `frontend/` chat UI) and points it at `http://localhost:8080`.
 
 ### Useful commands
 
@@ -49,12 +50,14 @@ docker compose build --no-cache api   # force full rebuild
 | Build runs out of memory | Docker Desktop → Settings → Resources → **8 GB+ RAM** |
 | `GROQ_API_KEY` missing | Set in `backend/.env` |
 | `/ready` fails on startup | Wait 1–2 min; index loads at container start |
-| Frontend can't reach API | Confirm `config.js` uses `http://localhost:8080` |
+| Frontend can't reach API | Confirm compose build arg `VITE_API_BASE=http://localhost:8080` |
 
 ### API-only (no compose)
 
+Serves the React SPA from the same container (`SERVE_FRONTEND=true`):
+
 ```powershell
-docker build -t rag-arcgis-chatbot:latest backend
+docker build -f backend/Dockerfile -t rag-arcgis-chatbot:latest .
 docker run --rm -p 8080:8080 --env-file backend\.env rag-arcgis-chatbot:latest
 ```
 

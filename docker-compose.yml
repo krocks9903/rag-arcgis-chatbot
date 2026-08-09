@@ -1,9 +1,10 @@
-# Local Docker stack (free) — API + static frontend
+# Local Docker stack (free) — API + React frontend
 #
 # Usage:
 #   1. Copy backend/.env.example → backend/.env and set GROQ_API_KEY
 #   2. docker compose up --build
-#   3. Open http://localhost:3000 (frontend)  API: http://localhost:8080
+#   3. Open http://localhost:3000 (React UI)  API: http://localhost:8080
+#   4. Admin: http://localhost:3000/admin.html
 #
 # First build downloads ML models and bakes the FAISS index (~15–25 min).
 # Later builds use Docker layer cache.
@@ -19,6 +20,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
+      # React is served by the web service; API stays JSON-only here.
       SERVE_FRONTEND: "false"
       PORT: "8080"
     restart: unless-stopped
@@ -30,11 +32,13 @@ services:
       start_period: 120s
 
   web:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: frontend-react/Dockerfile
+      args:
+        VITE_API_BASE: http://localhost:8080
     ports:
       - "3000:80"
-    volumes:
-      - ./frontend:/usr/share/nginx/html:ro
     depends_on:
       api:
         condition: service_healthy
