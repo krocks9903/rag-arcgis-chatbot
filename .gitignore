@@ -8,10 +8,21 @@ venv/
 
 # Vector store index (rebuilt on startup)
 faiss_index/
+backend/faiss_index/
 
 # Per-call LLM usage log (backend/llm_provider.py) — runtime data, grows
 # forever, never something to commit.
 backend/logs/
+
+# Pipeline caches (Lee County API responses, pytest)
+.cache/
+.pytest_cache/
+.test_tmp/
+.tmp/
+
+# Runtime user reports (admin inbox)
+backend/data/ops/reports.json
+backend/data/ops/reports.json.tmp
 
 # Data files (add your own)
 data/*.csv
@@ -24,3 +35,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Local eval / feedback artifacts (regeneratable or user-generated)
+backend/data/feedback/
+backend/data/eval_reports/

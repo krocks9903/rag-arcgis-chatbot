@@ -5,8 +5,10 @@ import re
 
 import pandas as pd
 
+from config import ENABLE_KEYWORD_SHORTCUT, KEYWORD_FAST_MAX_ROWS
 from models import ChatResponse, RouteKind
-from router import APP_ID_RE, YEAR_RE
+from retrieval import query_wants_recent
+from router import APP_ID_RE, NARRATIVE_RE, YEAR_RE
 from schema_aliases import pick_column, search_columns
 from structured_path import _row_to_project
 
@@ -52,3 +54,23 @@ def answer_keyword(df: pd.DataFrame, question: str) -> ChatResponse:
         route=RouteKind.KEYWORD.value,
         meta={"matched_rows": n},
     )
+
+
+def is_strong_keyword_hit(kw: ChatResponse, question: str) -> bool:
+    """True when keyword results are tight enough to skip the LLM."""
+    if not ENABLE_KEYWORD_SHORTCUT:
+        return False
+    n = int(kw.meta.get("matched_rows") or 0)
+    if n <= 0 or not kw.projects:
+        return False
+    # Application IDs are unique enough to trust without synthesis.
+    if APP_ID_RE.search(question):
+        return True
+    # Conversational "recent/new/latest" needs RAG + age filtering; keyword
+    # token matches can surface a handful of old rows and skip that path.
+    if query_wants_recent(question):
+        return False
+    # Broad narrative over many hits still needs RAG prose.
+    if NARRATIVE_RE.search(question) and n > min(3, KEYWORD_FAST_MAX_ROWS):
+        return False
+    return n <= KEYWORD_FAST_MAX_ROWS

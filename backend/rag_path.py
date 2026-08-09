@@ -1,69 +1,111 @@
-"""Corrective RAG path: hybrid retrieval, grading, rewrite, Groq generation."""
+"""Corrective RAG path: Gemini extracts facts, Groq writes the citizen summary."""
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-from typing import Any
+import time
+from collections.abc import Iterator
+from datetime import date, timedelta
+from typing import Any, Literal
 
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain_groq import ChatGroq
 from langchain.schema import Document
 
-from config import CRAG_MAX_ITERS, GROQ_MODEL, SCORE_THRESHOLD
+from config import (
+    CRAG_MAX_ITERS,
+    ENABLE_LLM_COLLABORATE,
+    GEMINI_MODEL,
+    GROQ_MODEL,
+    SCORE_THRESHOLD,
+)
 from models import ChatResponse, ProjectOut, RouteKind
-from retrieval import best_score, format_docs, hybrid_retrieve
+from prompt_loader import load_prompt
+from config import RECENT_QUERY_MAX_AGE_YEARS
+from retrieval import (
+    best_score,
+    format_docs,
+    hits_meta,
+    hybrid_retrieve,
+    query_wants_recent,
+    scope_hits_to_project,
+)
+from stale_sources import parse_source_date
 from store import DataStore
 
-PROMPT_TEMPLATE = """You are a helpful assistant for the Village of Estero's Engage Estero platform.
-You help residents understand Planning, Zoning & Design Board decisions using official meeting records.
+logger = logging.getLogger(__name__)
 
-RULES — follow exactly:
-1. Only use facts from the Context. Never invent any detail.
-2. If no relevant info exists, set summary to exactly: "I don't have records on that." and projects to [].
-3. Write plain English in summary and project summaries. No markdown, no asterisks.
-4. For each matching project, fill every field from the Context only.
-5. document_url must be copied exactly from Document_Link in the context — never invent URLs.
-6. status must be one of: Approved, Denied, Continued, or No decision recorded.
-
-Return ONLY valid JSON (no markdown fences) with this exact shape:
-{{
-  "summary": "one closing sentence",
-  "projects": [
-    {{
-      "title": "short project name from ProjectName",
-      "id": "ApplicationID",
-      "location": "Location or LocationName",
-      "summary": "1-2 sentences",
-      "status": "Approved | Denied | Continued | No decision recorded",
-      "date": "MeetingDate",
-      "document_url": "Document_Link"
-    }}
-  ]
-}}
-
-Context:
-{context}
-
-Question: {question}
-
-JSON:"""
-
-_llm: ChatGroq | None = None
+Provider = Literal["gemini", "groq"]
+_llms: dict[str, Any] = {}
 
 
-def get_llm() -> ChatGroq:
-    global _llm
-    if _llm is None:
-        _llm = ChatGroq(
+def _prompt(name: str) -> str:
+    import config as cfg
+
+    return load_prompt(name, cfg.PROMPT_VARIANT)
+
+
+def _variant_name() -> str:
+    import config as cfg
+
+    return cfg.PROMPT_VARIANT
+
+
+def gemini_available() -> bool:
+    return bool(os.getenv("GEMINI_API_KEY"))
+
+
+def groq_available() -> bool:
+    return bool(os.getenv("GROQ_API_KEY"))
+
+
+def get_llm(provider: Provider):
+    """Return a cached chat model for gemini or groq."""
+    if provider == "gemini":
+        if not gemini_available():
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        cache_key = f"gemini:{GEMINI_MODEL}"
+        if cache_key not in _llms:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            _llms[cache_key] = ChatGoogleGenerativeAI(
+                model=GEMINI_MODEL,
+                google_api_key=os.environ["GEMINI_API_KEY"],
+                temperature=0,
+                max_output_tokens=1600,
+            )
+            logger.info("Initialized Gemini LLM model=%s", GEMINI_MODEL)
+        return _llms[cache_key]
+
+    if not groq_available():
+        raise RuntimeError("GROQ_API_KEY is not set")
+    cache_key = f"groq:{GROQ_MODEL}"
+    if cache_key not in _llms:
+        from langchain_groq import ChatGroq
+
+        _llms[cache_key] = ChatGroq(
             model=GROQ_MODEL,
-            groq_api_key=os.getenv("GROQ_API_KEY"),
+            groq_api_key=os.environ["GROQ_API_KEY"],
             temperature=0.0,
-            max_tokens=1500,
+            max_tokens=900,
+            timeout=90,
+            max_retries=1,
         )
-    return _llm
+        logger.info("Initialized Groq LLM model=%s", GROQ_MODEL)
+    return _llms[cache_key]
+
+
+# Back-compat for warmup / older callers that used tier names.
+def choose_llm_tier(question: str, crag_meta: dict[str, Any] | None = None) -> str:
+    _ = question, crag_meta
+    if gemini_available() and groq_available() and ENABLE_LLM_COLLABORATE:
+        return "collaborate"
+    if gemini_available():
+        return "gemini"
+    return "groq"
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -79,16 +121,237 @@ def _extract_json(text: str) -> dict[str, Any]:
         raise
 
 
+def finalize_prose(text: str) -> str:
+    """Trim quotes/whitespace and drop a trailing incomplete fragment."""
+    text = (text or "").strip().strip('"').strip("'").strip()
+    if not text:
+        return text
+    if text[-1] in ".!?":
+        return text
+    sentence_ends = [m.end() - 1 for m in re.finditer(r"[.!?](?=\s|$)", text)]
+    if sentence_ends and sentence_ends[-1] >= 20:
+        return text[: sentence_ends[-1] + 1].strip()
+    if len(text.split()) >= 6:
+        return text.rstrip(",;:- ") + "."
+    return text
+
+
+def format_summary_bullets(text: str) -> str:
+    """Normalize a summary into markdown '- ' bullet lines."""
+    text = (text or "").strip().strip('"').strip("'").strip()
+    if not text:
+        return text
+    empty = "I don't have records on that."
+    if text.lower().rstrip(".") == empty.lower().rstrip("."):
+        return empty
+
+    bullets: list[str] = []
+    # Already bullet-ish
+    if re.search(r"(?m)^(?:[-*•]|\d+\.)\s+", text):
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^(?:[-*•]|\d+\.)\s+", "", line).strip()
+            line = finalize_prose(line)
+            if line:
+                bullets.append(f"- {line}")
+    else:
+        # Split prose into sentence bullets
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        for part in parts:
+            line = finalize_prose(part.strip())
+            if line:
+                bullets.append(f"- {line}")
+
+    if not bullets:
+        return empty
+    # Keep the answer scannable
+    return "\n".join(bullets[:6])
+
+
 def parse_structured_answer(raw: str, route: str = RouteKind.RAG.value) -> ChatResponse:
     try:
         payload = _extract_json(raw)
         projects = [ProjectOut.model_validate(p) for p in payload.get("projects", [])]
-        summary = str(payload.get("summary", "")).strip()
+        for p in projects:
+            p.summary = finalize_prose(p.summary)
+            p.title = (p.title or "").strip()
+        summary = format_summary_bullets(str(payload.get("summary", "")).strip())
         if not summary and not projects:
             summary = "I don't have records on that."
-        return ChatResponse(summary=summary, projects=projects, answer=summary, route=route)
+        result = ChatResponse(summary=summary, projects=projects[:5], answer=summary, route=route)
+        result.meta["parse_ok"] = True
+        return result
     except Exception:
-        return ChatResponse(summary=raw.strip(), projects=[], answer=raw.strip(), route=route)
+        result = ChatResponse(summary=raw.strip(), projects=[], answer=raw.strip(), route=route)
+        result.meta["parse_ok"] = False
+        return result
+
+
+def parse_projects_only(raw: str) -> list[ProjectOut]:
+    try:
+        payload = _extract_json(raw)
+        projects = [ProjectOut.model_validate(p) for p in payload.get("projects", [])]
+        for p in projects:
+            p.summary = finalize_prose(p.summary)
+        return projects[:5]
+    except Exception:
+        logger.warning("Gemini extract JSON parse failed")
+        return []
+
+
+_QUERY_STOP = frozenset(
+    {
+        "are",
+        "is",
+        "was",
+        "were",
+        "there",
+        "any",
+        "new",
+        "the",
+        "and",
+        "for",
+        "what",
+        "show",
+        "about",
+        "have",
+        "has",
+        "had",
+        "with",
+        "from",
+        "that",
+        "this",
+        "these",
+        "those",
+        "minutes",
+        "meeting",
+        "estero",
+        "village",
+        "please",
+        "tell",
+        "me",
+        "you",
+        "how",
+        "many",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "did",
+        "does",
+        "do",
+        "can",
+        "could",
+        "would",
+        "should",
+        "latest",
+        "recent",
+        "recently",
+        "find",
+        "list",
+        "all",
+        "developments",
+        "development",
+        "projects",
+        "project",
+        "updates",
+        "update",
+        "happening",
+        "going",
+        "on",
+    }
+)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Content tokens for query↔project overlap (light plural stemming)."""
+    toks = re.findall(r"[a-z0-9]{3,}", (text or "").lower())
+    out: set[str] = set()
+    for t in toks:
+        if t in _QUERY_STOP:
+            continue
+        out.add(t)
+        if len(t) > 4 and t.endswith("s") and not t.endswith("ss"):
+            out.add(t[:-1])
+    return out
+
+
+def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """Drop extracted cards that share no content tokens with the question.
+
+    Prevents BM25/LLM false positives like a 2017 "any new evidence" discussion
+    matching "are there any new wawas?".
+
+    If the question has no content tokens, or overlap would drop every card
+    (e.g. "what was approved?" vs titles that omit that word), keep the
+    original list so vague status questions still work.
+    """
+    q = _content_tokens(question)
+    if not q:
+        return projects
+    kept: list[ProjectOut] = []
+    for p in projects:
+        hay = _content_tokens(" ".join([p.title, p.id, p.location, p.summary]))
+        if q & hay:
+            kept.append(p)
+    if not kept:
+        return projects
+    if kept != projects:
+        logger.info(
+            "filter_projects_for_query dropped %s/%s projects for %r",
+            len(projects) - len(kept),
+            len(projects),
+            question[:80],
+        )
+    return kept
+
+
+def filter_projects_for_recency(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """When the user asks for recent/new items, drop older project cards.
+
+    Never restores known-old dated cards: fresh → undated → empty.
+    Fresh cards are sorted newest-first.
+    """
+    if not projects or not query_wants_recent(question):
+        return projects
+    years = RECENT_QUERY_MAX_AGE_YEARS
+    if years <= 0:
+        return projects
+    cutoff = date.today() - timedelta(days=int(years * 365.25))
+    kept: list[ProjectOut] = []
+    undated: list[ProjectOut] = []
+    for p in projects:
+        d = parse_source_date(p.date)
+        if d is None:
+            undated.append(p)
+        elif d >= cutoff:
+            kept.append(p)
+    if kept:
+        kept.sort(
+            key=lambda p: parse_source_date(p.date) or date.min,
+            reverse=True,
+        )
+        result = kept
+    elif undated:
+        result = undated
+    else:
+        result = []
+    if result != projects:
+        logger.info(
+            "filter_projects_for_recency kept %s/%s for %r",
+            len(result),
+            len(projects),
+            question[:80],
+        )
+    return result
+
+
+def refine_projects_for_question(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
+    """Apply entity overlap then recency filters to extracted project cards."""
+    return filter_projects_for_recency(question, filter_projects_for_query(question, projects))
 
 
 def grade_context(hits: list[tuple[Document, float]]) -> str:
@@ -103,7 +366,15 @@ def grade_context(hits: list[tuple[Document, float]]) -> str:
 
 
 def rewrite_query(question: str) -> str:
-    return f"{question.strip()} Estero Florida planning zoning design board"
+    """Expand a weak query for a CRAG retry without injecting bare years.
+
+    Bare years would trip query_wants_recent's year detector if intent were
+    derived from the rewrite; we still avoid them for cleaner retrieval text.
+    """
+    base = f"{question.strip()} Estero Florida planning zoning design board"
+    if query_wants_recent(question):
+        return f"{base} recent planning meetings last two years"
+    return base
 
 
 def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, Any]]:
@@ -112,48 +383,181 @@ def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, 
     hits: list[tuple[Document, float]] = []
     for i in range(CRAG_MAX_ITERS):
         meta["crag_iters"] = i + 1
-        hits = hybrid_retrieve(store, query)
+        # Recency intent always follows the original citizen question.
+        hits = hybrid_retrieve(store, query, intent_query=question)
         verdict = grade_context(hits)
         meta["last_verdict"] = verdict
         if verdict == "correct":
             break
         if verdict in {"incorrect", "ambiguous"} and i < CRAG_MAX_ITERS - 1:
-            query = rewrite_query(query)
+            query = rewrite_query(question)
             meta["rewrites"].append(query)
-    meta["best_score"] = round(best_score(hits), 4)
-    meta["retrieved"] = len(hits)
-    return format_docs(hits), meta
+    scoped = scope_hits_to_project(store, hits)
+    if len(scoped) != len(hits):
+        meta["project_scoped"] = len(scoped)
+    meta.update(hits_meta(scoped))
+    return format_docs(scoped), meta
 
 
-def generate_answer(question: str, context: str, route: str = RouteKind.RAG.value) -> ChatResponse:
-    prompt = PromptTemplate(template=PROMPT_TEMPLATE, input_variables=["context", "question"])
+def _invoke_solo(question: str, context: str, provider: Provider, route: str) -> ChatResponse:
+    prompt = PromptTemplate(template=_prompt("solo"), input_variables=["context", "question"])
     chain = (
         {"context": lambda _: context, "question": RunnablePassthrough()}
         | prompt
-        | get_llm()
+        | get_llm(provider)
         | StrOutputParser()
     )
     raw = chain.invoke(question)
-    return parse_structured_answer(raw, route=route)
+    result = parse_structured_answer(raw, route=route)
+    result.projects = refine_projects_for_question(question, result.projects)
+    result.meta["llm_provider"] = provider
+    result.meta["llm_model"] = GEMINI_MODEL if provider == "gemini" else GROQ_MODEL
+    result.meta["llm_mode"] = "solo"
+    result.meta["prompt_variant"] = _variant_name()
+    return result
+
+
+def gemini_extract_projects(question: str, context: str) -> list[ProjectOut]:
+    prompt = PromptTemplate(template=_prompt("extract"), input_variables=["context", "question"])
+    chain = (
+        {"context": lambda _: context, "question": RunnablePassthrough()}
+        | prompt
+        | get_llm("gemini")
+        | StrOutputParser()
+    )
+    raw = chain.invoke(question)
+    return refine_projects_for_question(question, parse_projects_only(raw))
+
+
+def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:
+    projects_json = json.dumps([p.model_dump() for p in projects[:5]], ensure_ascii=False)
+    prompt = PromptTemplate(template=_prompt("summary"), input_variables=["question", "projects_json"])
+    chain = prompt | get_llm("groq") | StrOutputParser()
+    text = chain.invoke({"question": question, "projects_json": projects_json})
+    text = format_summary_bullets(text)
+    if not text:
+        if projects:
+            titles = [p.title for p in projects[:3] if p.title]
+            bullets = [f"- Related record: {t}." for t in titles] or [
+                f"- Records show {len(projects)} related item{'s' if len(projects) != 1 else ''}."
+            ]
+            return "\n".join(bullets)
+        return "I don't have records on that."
+    return text
+
+
+def stream_groq_summary(question: str, projects: list[ProjectOut]) -> Iterator[str]:
+    projects_json = json.dumps([p.model_dump() for p in projects[:5]], ensure_ascii=False)
+    prompt = PromptTemplate(template=_prompt("summary"), input_variables=["question", "projects_json"])
+    chain = prompt | get_llm("groq") | StrOutputParser()
+    for chunk in chain.stream({"question": question, "projects_json": projects_json}):
+        if chunk:
+            yield chunk
+
+
+def generate_collaborative(
+    question: str,
+    context: str,
+    route: str = RouteKind.RAG.value,
+) -> ChatResponse:
+    """Gemini extracts projects; Groq writes the closing summary."""
+    t_extract = time.perf_counter()
+    projects = gemini_extract_projects(question, context)
+    extract_ms = round((time.perf_counter() - t_extract) * 1000)
+
+    t_summary = time.perf_counter()
+    summary = groq_write_summary(question, projects)
+    summary_ms = round((time.perf_counter() - t_summary) * 1000)
+
+    result = ChatResponse(
+        summary=summary,
+        projects=projects,
+        answer=summary,
+        route=route,
+        meta={
+            "parse_ok": True,
+            "llm_mode": "collaborate",
+            "llm_providers": ["gemini", "groq"],
+            "llm_models": {"extract": GEMINI_MODEL, "summary": GROQ_MODEL},
+            "prompt_variant": _variant_name(),
+            "extract_ms": extract_ms,
+            "summary_ms": summary_ms,
+        },
+    )
+    logger.info(
+        "collaborate extract_ms=%s summary_ms=%s projects=%s",
+        extract_ms,
+        summary_ms,
+        len(projects),
+    )
+    return result
+
+
+def generate_answer(
+    question: str,
+    context: str,
+    route: str = RouteKind.RAG.value,
+    crag_meta: dict[str, Any] | None = None,
+) -> ChatResponse:
+    _ = crag_meta
+    both = gemini_available() and groq_available() and ENABLE_LLM_COLLABORATE
+    if both:
+        try:
+            return generate_collaborative(question, context, route=route)
+        except Exception as e:
+            logger.warning("Collaborate failed (%s); falling back to solo", e)
+
+    if gemini_available():
+        try:
+            return _invoke_solo(question, context, "gemini", route)
+        except Exception as e:
+            logger.warning("Gemini solo failed (%s)", e)
+            if groq_available():
+                result = _invoke_solo(question, context, "groq", route)
+                result.meta["escalated_from"] = "gemini_error"
+                return result
+            raise
+
+    if groq_available():
+        return _invoke_solo(question, context, "groq", route)
+
+    raise RuntimeError("No LLM API key set (need GEMINI_API_KEY and/or GROQ_API_KEY)")
 
 
 def answer_rag(store: DataStore, question: str) -> ChatResponse:
+    t0 = time.perf_counter()
     context, crag_meta = retrieve_with_crag(store, question)
-    result = generate_answer(question, context)
+    crag_meta["retrieve_ms"] = round((time.perf_counter() - t0) * 1000)
+    t1 = time.perf_counter()
+    result = generate_answer(question, context, crag_meta=crag_meta)
+    crag_meta["generate_ms"] = round((time.perf_counter() - t1) * 1000)
     result.route = RouteKind.RAG.value
     result.meta.update(crag_meta)
     return result
 
 
-def stream_llm_tokens(question: str, context: str):
-    """Yield text chunks from Groq for SSE streaming."""
-    prompt = PromptTemplate(template=PROMPT_TEMPLATE, input_variables=["context", "question"])
+# Legacy aliases used by orchestrator / warmup
+def invoke_llm(question: str, context: str, tier: str = "fast", route: str = RouteKind.RAG.value) -> ChatResponse:
+    provider: Provider = "gemini" if tier in {"fast", "gemini"} and gemini_available() else "groq"
+    return _invoke_solo(question, context, provider, route)
+
+
+def stream_llm_tokens(question: str, context: str, tier: str = "fast") -> Iterator[str]:
+    """Solo-stream full JSON (fallback when collaborate streaming is not used)."""
+    provider: Provider = "gemini" if tier in {"fast", "gemini"} and gemini_available() else "groq"
+    prompt = PromptTemplate(template=_prompt("solo"), input_variables=["context", "question"])
     chain = (
         {"context": lambda _: context, "question": RunnablePassthrough()}
         | prompt
-        | get_llm()
+        | get_llm(provider)
         | StrOutputParser()
     )
     for chunk in chain.stream(question):
         if chunk:
             yield chunk
+
+
+def should_escalate(result: ChatResponse, crag_meta: dict[str, Any] | None = None) -> bool:
+    """Kept for import compatibility; collaborate replaces escalate."""
+    _ = result, crag_meta
+    return False

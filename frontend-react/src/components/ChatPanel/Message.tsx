@@ -8,12 +8,19 @@ import ArticleCard from "./ArticleCard";
 import VillageCouncilCard from "./VillageCouncilCard";
 import SourcesList from "./SourcesList";
 import TypingIndicator from "./TypingIndicator";
+import type { ReportPrefill } from "../ReportDialog/ReportDialog";
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-export default function Message({ message }: { message: ChatMessage }) {
+export default function Message({
+  message,
+  onReport,
+}: {
+  message: ChatMessage;
+  onReport?: (prefill: ReportPrefill) => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   if (message.role === "user") {
@@ -60,7 +67,7 @@ export default function Message({ message }: { message: ChatMessage }) {
             ) : c.sourceType === "village_council" ? (
               <VillageCouncilCard key={i} card={c} />
             ) : (
-              <ProjectCard key={i} card={c} />
+              <ProjectCard key={i} card={c} onReport={onReport} />
             ),
           )}
           {finished && !hasContent && !message.error && <div>Sorry, I couldn't find an answer.</div>}

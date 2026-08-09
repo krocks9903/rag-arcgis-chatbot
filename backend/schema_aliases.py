@@ -9,6 +9,8 @@ import pandas as pd
 ALIASES: dict[str, tuple[str, ...]] = {
     "application_id": ("ApplicationID", "ApplicationId"),
     "project_name": ("ProjectName", "ProjectTitle"),
+    "project_id": ("ProjectId",),
+    "project_key": ("ProjectKey",),
     "location": ("Location", "LocationName", "AddressNormalized", "AddressRaw"),
     "meeting_date": ("MeetingDate",),
     "meeting_year": ("MeetingYear",),
@@ -58,3 +60,23 @@ def row_value(row: dict[str, Any], *logical_names: str, default: str = "") -> st
             if val is not None and str(val).strip() and str(val).lower() != "nan":
                 return str(val)
     return default
+
+
+# Gold export column names -> canonical names used by retrieval code.
+RENAME_ON_LOAD: dict[str, str] = {
+    "ApplicationId": "ApplicationID",
+    "AddressNormalized": "Location",
+    "PrimarySourceUrl": "Document_Link",
+    "SourceFilename": "Filename",
+}
+
+
+def load_dataframe(csv_path: str) -> pd.DataFrame:
+    """Load CSV and normalize gold schema column names for downstream code."""
+    df = pd.read_csv(csv_path, encoding="utf-8")
+    renames = {
+        old: new
+        for old, new in RENAME_ON_LOAD.items()
+        if old in df.columns and new not in df.columns
+    }
+    return df.rename(columns=renames)

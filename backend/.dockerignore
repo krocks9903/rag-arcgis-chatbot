@@ -5,3 +5,7 @@ __pycache__/
 faiss_index/
 tests/
 .git/
+# Medallion tiers not needed at runtime — only the gold AI corpus.
+data/bronze/
+data/silver/
+data/gold/arcgis/

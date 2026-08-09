@@ -1,26 +1,28 @@
-# Container image for the RAG ArcGIS chatbot backend (FastAPI + FAISS + Groq).
+# Container image for the RAG ArcGIS chatbot (FastAPI + FAISS + Groq + static frontend).
+# Build from repo root: docker build -f backend/Dockerfile -t rag-arcgis-chatbot .
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080 \
-    HF_HOME=/app/.cache/huggingface \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
-    SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence-transformers \
+    HF_HOME=/app/backend/.cache/huggingface \
+    TRANSFORMERS_CACHE=/app/backend/.cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/app/backend/.cache/sentence-transformers \
     EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
-    RERANKER_MODEL=BAAI/bge-reranker-base \
-    SERVE_FRONTEND=false
+    RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 \
+    SERVE_FRONTEND=true
 
-WORKDIR /app
+WORKDIR /app/backend
 
-COPY requirements.txt .
+COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/ .
+COPY frontend/ /app/frontend
 
 # Pre-download models and bake FAISS + BM25 index for fast Cloud Run cold starts.
-RUN mkdir -p /app/.cache/huggingface /app/.cache/sentence-transformers \
-    && python -c "from store import build_store; from config import DEFAULT_CSV_PATH; build_store(DEFAULT_CSV_PATH)"
+RUN mkdir -p /app/backend/.cache/huggingface /app/backend/.cache/sentence-transformers \
+    && python -c "from store import build_store; from config import DEFAULT_CSV_PATH; build_store(DEFAULT_CSV_PATH); from retrieval import get_reranker; get_reranker()"
 
 EXPOSE 8080
 

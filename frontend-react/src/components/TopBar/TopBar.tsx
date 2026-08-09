@@ -1,17 +1,25 @@
 import logo from "../../assets/logo.png";
+import { API_BASE } from "../../lib/config";
 
 interface TopBarProps {
   recordCount: number | null | undefined;
   onNewChat: () => void;
   onToggleMobileMap: () => void;
+  onReport: () => void;
 }
 
 export default function TopBar({
   recordCount,
   onNewChat,
   onToggleMobileMap,
+  onReport,
 }: TopBarProps) {
-  const liveLabel = recordCount === undefined ? "Live data · loading…" : recordCount === null ? "Live data · connected" : `Live data · ${recordCount} records`;
+  const liveLabel =
+    recordCount === undefined
+      ? "Live data · loading…"
+      : recordCount === null
+        ? "Live data · connected"
+        : `Live data · ${recordCount} records`;
 
   return (
     <header id="topbar">
@@ -27,6 +35,12 @@ export default function TopBar({
         <button type="button" className="topbar-btn" onClick={onNewChat}>
           + New chat
         </button>
+        <button type="button" className="topbar-btn" onClick={onReport} title="Report incorrect data">
+          Report
+        </button>
+        <a className="topbar-btn" href={`${API_BASE}/admin.html`} title="Administrator console">
+          Admin
+        </a>
         <div id="live-badge">
           <div id="live-dot" />
           <span id="record-count">{liveLabel}</span>

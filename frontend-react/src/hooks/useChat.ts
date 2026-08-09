@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { API_BASE } from "../lib/config";
+import { apiHeaders } from "../lib/deviceId";
 import {
   cleanProse,
   extractJsonCards,
@@ -8,10 +9,27 @@ import {
   parseBotText,
   parseStructuredResponse,
 } from "../lib/parseAnswer";
+import { clearResultsOnMap, showResultsOnMap } from "../lib/mapViewStore";
+import { switchToTab } from "../lib/uiStore";
 import type { ChatApiResponse, ChatMessage, NormalizedCard, StreamDonePayload } from "../types";
 
 function makeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** After an answer lands, if any result cards carry coordinates, reveal the map
+ * and zoom/fit to them so the map tracks what the user asked about. Queries with
+ * no located results (e.g. "how many approved items") leave the map untouched. */
+function focusMapOnCards(cards: NormalizedCard[]): void {
+  const points = cards
+    .filter((c) => c.lat !== null && c.lng !== null)
+    .map((c) => ({ lat: c.lat as number, lng: c.lng as number, label: c.title || c.id }));
+  if (points.length === 0) return;
+  switchToTab("map");
+  // Double rAF: if the Map tab was hidden, this lets it become visible and
+  // resize to its real dimensions before we recentre, so the target lands at
+  // the true centre (same guard RightPanel uses when restoring view state).
+  requestAnimationFrame(() => requestAnimationFrame(() => void showResultsOnMap(points)));
 }
 
 type Setter = React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -22,16 +40,32 @@ function patchMessage(setMessages: Setter, id: string, patch: Partial<ChatMessag
   setMessages((msgs) => msgs.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 }
 
+function rateLimitProse(status: number, detail?: string): string {
+  if (status === 429) {
+    return "⚠️ Too many requests — wait a moment and try again.";
+  }
+  return `⚠️ Backend error ${status}: ${detail || "Unknown error"}`;
+}
+
 async function tryStreamChat(question: string, botId: string, setMessages: Setter): Promise<boolean> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify({ question }),
     });
   } catch {
     return false;
+  }
+  if (res.status === 429) {
+    const err = await res.json().catch(() => ({}) as { detail?: string });
+    patchMessage(setMessages, botId, {
+      prose: rateLimitProse(429, err.detail),
+      streaming: false,
+      error: true,
+    });
+    return true;
   }
   if (!res.ok || !res.body) return false;
 
@@ -84,6 +118,7 @@ async function tryStreamChat(question: string, botId: string, setMessages: Sette
     sources: donePayload?.sources || [],
     streaming: false,
   });
+  focusMapOnCards(cards);
   return true;
 }
 
@@ -91,14 +126,14 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
   try {
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify({ question }),
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}) as { detail?: string });
       patchMessage(setMessages, botId, {
-        prose: `⚠️ Backend error ${res.status}: ${err.detail || "Unknown error"}`,
+        prose: rateLimitProse(res.status, err.detail),
         streaming: false,
         error: true,
       });
@@ -110,6 +145,7 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
     if (data.projects || data.articles || data.summary) {
       const { prose, cards } = parseStructuredResponse(data);
       patchMessage(setMessages, botId, { prose, cards, sources: data.sources || [], streaming: false });
+      focusMapOnCards(cards);
       return;
     }
 
@@ -124,6 +160,7 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
       return;
     }
     patchMessage(setMessages, botId, { prose, cards, sources: data.sources || [], streaming: false });
+    focusMapOnCards(cards);
   } catch {
     patchMessage(setMessages, botId, {
       prose: `⚠️ Could not reach the backend at ${API_BASE}. Is uvicorn running?`,
@@ -139,6 +176,7 @@ export function useChat() {
 
   const newChat = useCallback(() => {
     setMessages([]);
+    clearResultsOnMap();
   }, []);
 
   const send = useCallback(async (text: string) => {

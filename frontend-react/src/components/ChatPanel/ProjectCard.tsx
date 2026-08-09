@@ -2,8 +2,14 @@ import type { NormalizedCard } from "../../types";
 import { statusClass, statusEmoji } from "../../lib/parseAnswer";
 import { openDirections, panToCoords } from "../../lib/mapViewStore";
 import { switchToTab } from "../../lib/uiStore";
+import type { ReportPrefill } from "../ReportDialog/ReportDialog";
 
-export default function ProjectCard({ card }: { card: NormalizedCard }) {
+interface ProjectCardProps {
+  card: NormalizedCard;
+  onReport?: (prefill: ReportPrefill) => void;
+}
+
+export default function ProjectCard({ card, onReport }: ProjectCardProps) {
   const meta = [card.id, card.location].filter(Boolean).join(" · ");
   const minutesUrl = card.pdfUrl || card.documentUrl;
   const hasCoords = card.lat !== null && card.lng !== null;
@@ -11,7 +17,6 @@ export default function ProjectCard({ card }: { card: NormalizedCard }) {
   const showOnMap = () => {
     if (card.lat === null || card.lng === null) return;
     switchToTab("map");
-    // Give the map tab a frame to become visible/sized before panning.
     requestAnimationFrame(() => panToCoords(card.lat!, card.lng!));
   };
 
@@ -49,6 +54,22 @@ export default function ProjectCard({ card }: { card: NormalizedCard }) {
         {hasCoords && (
           <button type="button" className="btn-showmap" onClick={showOnMap}>
             🧭 Show on map
+          </button>
+        )}
+        {onReport && (
+          <button
+            type="button"
+            className="btn-report"
+            onClick={() =>
+              onReport({
+                kind: card.location ? "incorrect_location" : "suggest_change",
+                application_id: card.id || "",
+                location: card.location || "",
+                current_value: card.location || card.title || "",
+              })
+            }
+          >
+            ⚑ Report
           </button>
         )}
       </div>

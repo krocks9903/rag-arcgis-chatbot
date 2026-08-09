@@ -1,0 +1,1248 @@
+from __future__ import annotations
+
+import re
+
+# ---------------------------------------------------------------------------
+# Canonical location_type vocabulary
+#
+# The pipeline historically emitted two conventions: uppercase GEOMETRY types
+# assigned by location_resolver.py, and title-case DESCRIPTIVE types from the
+# location seeds below / the classifier. Everything is normalized to a single
+# UPPER_SNAKE controlled vocabulary at write time (build.py) so the serving
+# schema (pipeline/schema.sql, public.locations) can enforce a clean CHECK.
+# ---------------------------------------------------------------------------
+
+CANONICAL_LOCATION_TYPES: frozenset[str] = frozenset({
+    # geometry — how the place is geolocated
+    "PARCEL", "PARCEL_ADDRESS", "MULTI_PARCEL", "INTERSECTION", "CORRIDOR",
+    "WHOLE_STREET", "NAMED_VENUE", "NEIGHBORHOOD", "ANCHORED_OFFSET",
+    # descriptive — what the place is
+    "PROJECT_SITE", "GENERAL_AREA", "DEVELOPMENT", "INFRASTRUCTURE",
+    "ROAD", "TRAIL", "PARK",
+})
+
+# Legacy label -> canonical. Synonyms fold; case-variants collapse.
+_LOCATION_TYPE_ALIASES: dict[str, str] = {
+    "project site": "PROJECT_SITE",
+    "general area": "GENERAL_AREA",
+    "development": "DEVELOPMENT",
+    "infrastructure": "INFRASTRUCTURE",
+    "meeting venue": "NAMED_VENUE",   # a meeting venue is a named venue
+    "road": "ROAD",
+    "trail": "TRAIL",
+    "park": "PARK",
+    "neighborhood": "NEIGHBORHOOD",   # collapse case-variant of NEIGHBORHOOD
+}
+
+
+def normalize_location_type(value: object) -> str:
+    """Map any emitted location_type to the canonical UPPER_SNAKE vocabulary.
+
+    Already-canonical values pass through; known legacy labels fold via
+    _LOCATION_TYPE_ALIASES. An unrecognized value is upper-snaked as a
+    best-effort fallback so a novel classifier label never silently drops
+    (it will still surface against schema.sql's CHECK, by design).
+    """
+    raw = ("" if value is None else str(value)).strip()
+    if not raw:
+        return ""
+    if raw in CANONICAL_LOCATION_TYPES:
+        return raw
+    aliased = _LOCATION_TYPE_ALIASES.get(raw.lower())
+    if aliased is not None:
+        return aliased
+    return re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
+
+
+# Shared vocab for road-improvement project specs (see classifiers.match_projects).
+# _ROAD_WORKS: public-works actions that mark a corridor capital project.
+# _ROAD_LANDUSE: private land-use signals that mark a development on the road
+# (which must NOT be swept into the road project). Terms are regexes.
+_ROAD_WORKS: list[str] = [
+    r"\bpath\b", r"pathway", r"landscap", r"lighting", r"street light", r"widen",
+    r"sidewalk", r"traffic signal", r"\beasement", r"improvement", r"bicycle",
+    r"pedestrian", r"\bbike\b", r"roundabout", r"\bbridge\b", r"roadway",
+    r"road cross", r"repav", r"intersection", r"turn lane", r"enhancement",
+    r"streetscape", r"median", r"wetland mitigation", r"structure demolition",
+    r"debris removal", r"maintenance agreement", r"maintenance responsibilit",
+    r"right-of-way", r"river creek", r"design and permitting", r"interlocal agreement",
+    r"\bupdate\b", r"change order", r"construction engineering", r"\bcei\b",
+    r"concept design", r"plant replacement", r"preliminary design", r"value engineering",
+]
+_ROAD_LANDUSE: list[str] = [
+    r"development order", r"zoning amendment", r"rezon", r"replat", r"\bplat\b",
+    r"conditional use", r"special exception", r"monument sign", r"sign package",
+    r"consumption on premises", r"comprehensive plan", r"\bd\.o\.", r"\bdci\s*20",
+    r"\bdos\s*20", r"\bsez\s*20", r"\badd\s*20", r"\bldo\s*20", r"\bcpa\s*20",
+    r"dealership", r"restaurant", r"\bschool\b", r"\bbank\b", r"pharma", r"auto ",
+    r"monument", r"\bhotel", r"apartment",
+]
+
+PROJECT_ALIASES: dict[str, list[str] | dict[str, list[str]]] = {
+    "BERT Rail Trail": [
+        "bert", "rail trail", "bonita-estero regional trail", "sunterra", "suntrail",
+    ],
+    "Septic to Sewer": [
+        "septic", "sewer", "utility extension", "uep", "estero bay village",
+        "sunny grove", "cypress bend", "broadway avenue east",
+    ],
+    # Road-improvement PROJECT — the public capital work on the corridor, not
+    # every private development that happens to front the road. A bare road
+    # name matched ~144 items (dozens of unrelated rezonings / development
+    # orders). Structured form: require the road + a public-works action, and
+    # exclude private land-use signals. See classifiers._alias_spec_matches.
+    "Corkscrew Road": {
+        "require": [r"corkscrew road", r"corkscrew rd", r"puente lane"],
+        "with": _ROAD_WORKS,
+        "exclude": _ROAD_LANDUSE,
+    },
+    "Comprehensive Plan": [
+        "comprehensive plan", "comp plan", "land development code",
+    ],
+    "Budget / Capital Improvement": [
+        "budget", "capital improvement", "cip", "millage",
+    ],
+    "Estero on the River": [
+        "estero on the river", "river oaks", "river oaks preserve",
+    ],
+    "Sandy Lane Improvements": {
+        "require": [r"sandy lane", r"sandy lake bike"],
+        "with": _ROAD_WORKS,
+        "exclude": _ROAD_LANDUSE,
+    },
+    "Broadway Avenue Utility Extension": [
+        "broadway avenue east", "broadway ave. east", "broadway east",
+        "broadway avenue west", "broadway ave. west", "broadway west",
+    ],
+    "Williams Road Improvements": {
+        "require": [r"williams road", r"williams rd"],
+        "with": _ROAD_WORKS,
+        "exclude": _ROAD_LANDUSE,
+    },
+    "Estero Parkway Improvements": {
+        "require": [r"estero parkway"],
+        "with": _ROAD_WORKS,
+        "exclude": _ROAD_LANDUSE,
+    },
+    "Ben Hill Griffin Parkway Improvements": {
+        "require": [r"ben hill griffin"],
+        "with": _ROAD_WORKS,
+        "exclude": _ROAD_LANDUSE,
+    },
+    "Comprehensive Plan / Land Development Code": [
+        "comprehensive plan", "land development code", "official zoning map",
+    ],
+}
+
+
+LOCATION_SEEDS: dict[str, dict[str, object]] = {
+    "Estero Village Hall": {
+        "location_type": "Meeting Venue",
+        "address": "9401 Corkscrew Palms Circle, Estero, FL 33928",
+        "latitude": 26.430490662544,
+        "longitude": -81.799280001688,
+        "confidence": 1.0,
+        "aliases": ["council chambers", "village hall", "9401 corkscrew palms"],
+    },
+    "Legacy Church": {
+        "location_type": "Meeting Venue",
+        "address": "21115 Design Parc Lane, Estero, FL 33928",
+        "latitude": 26.432182214424,
+        "longitude": -81.799357282836,
+        "confidence": 1.0,
+        "aliases": ["legacy church", "design parc lane"],
+    },
+    "Estero Fire Rescue": {
+        "location_type": "Meeting Venue",
+        "address": "21500 Three Oaks Parkway, Estero, FL 33928",
+        "latitude": 26.426449705114,
+        "longitude": -81.788771609677,
+        "confidence": 1.0,
+        "aliases": ["estero fire rescue", "21500 three oaks parkway"],
+    },
+    "BERT Rail Trail Corridor": {
+        "location_type": "Trail",
+        "address": "Seminole Gulf Railway corridor from southern Village limits to Estero Parkway, Estero, FL",
+        "latitude": 26.423875,
+        "longitude": -81.804915,
+        "confidence": 0.9,
+        "aliases": ["bert", "rail trail", "bonita-estero regional trail"],
+    },
+    "Corkscrew Road Widening Corridor": {
+        "location_type": "Road",
+        "address": "Corkscrew Road from Ben Hill Griffin Parkway to east of Bella Terra Boulevard, Estero, FL",
+        "latitude": 26.443916962688,
+        "longitude": -81.750022322755,
+        "confidence": 0.9,
+        "aliases": ["corkscrew road", "corkscrew rd"],
+    },
+    "Corkscrew Rd / Puente Lane": {
+        "location_type": "Road",
+        "address": "Corkscrew Road at Puente Lane, Estero, FL",
+        "latitude": 26.431386394627,
+        "longitude": -81.784740920078,
+        "confidence": 1.0,
+        "aliases": ["puente lane"],
+    },
+    "Estero Bay Village Septic Area": {
+        "location_type": "Infrastructure",
+        "address": "Estero Bay Village, Estero, FL",
+        "latitude": 26.4408,
+        "longitude": -81.8225,
+        "confidence": 0.9,
+        "aliases": ["estero bay village"],
+    },
+    "Sunny Grove Septic Area": {
+        "location_type": "Infrastructure",
+        "address": "Sunny Grove, Estero, FL",
+        "latitude": 26.4376,
+        "longitude": -81.8128,
+        "confidence": 0.9,
+        "aliases": ["sunny grove"],
+    },
+    "Cypress Bend Septic Area": {
+        "location_type": "Infrastructure",
+        "address": "Cypress Bend, Estero, FL",
+        "latitude": 26.4469,
+        "longitude": -81.8116,
+        "confidence": 0.9,
+        "aliases": ["cypress bend"],
+    },
+    "Broadway Avenue East UEP": {
+        "location_type": "Infrastructure",
+        "address": "Broadway Avenue East from US 41 to Sandy Lane, Estero, FL",
+        "latitude": 26.441974498538,
+        "longitude": -81.807963485741,
+        "confidence": 0.9,
+        "aliases": ["broadway avenue east", "broadway east"],
+    },
+    "Broadway Avenue West UEP": {
+        "location_type": "Infrastructure",
+        "address": "Broadway Avenue West from US 41 to Pine Tree Lane, Estero, FL",
+        "latitude": 26.441876807456,
+        "longitude": -81.822814751334,
+        "confidence": 0.9,
+        "aliases": ["broadway avenue west", "broadway ave. west", "broadway west"],
+    },
+    "Sandy Lane": {
+        "location_type": "Road",
+        "address": "Sandy Lane from Corkscrew Road to Broadway Avenue East, Estero, FL",
+        "latitude": 26.43663000848,
+        "longitude": -81.804926512673,
+        "confidence": 0.9,
+        "aliases": ["sandy lane", "sandy lake"],
+    },
+    "Williams Road": {
+        "location_type": "Road",
+        "address": "Williams Road from US 41 to Three Oaks Parkway, Estero, FL",
+        "latitude": 26.420352499197,
+        "longitude": -81.799938484002,
+        "confidence": 0.9,
+        "aliases": ["williams road", "williams rd"],
+    },
+    "Estero Parkway": {
+        "location_type": "Road",
+        "address": "Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",
+        "latitude": 26.448792003304,
+        "longitude": -81.803409304378,
+        "confidence": 0.9,
+        "aliases": ["estero parkway"],
+    },
+    "Ben Hill Griffin Parkway": {
+        "location_type": "Road",
+        "address": "Ben Hill Griffin Parkway from Corkscrew Road to Estero Parkway, Estero, FL",
+        "latitude": 26.442888042165,
+        "longitude": -81.772410260408,
+        "confidence": 0.9,
+        "aliases": ["ben hill griffin", "ben hill griffin parkway"],
+    },
+    "Three Oaks Parkway": {
+        "location_type": "Road",
+        "address": "Three Oaks Parkway from Williams Road to Estero Parkway, Estero, FL",
+        "latitude": 26.434889506286,
+        "longitude": -81.788651999919,
+        "confidence": 0.9,
+        "aliases": ["three oaks parkway"],
+    },
+    "US 41 / Tamiami Trail": {
+        "location_type": "Road",
+        "address": "US 41 from Williams Road to Estero Parkway, Estero, FL",
+        "latitude": 26.434255,
+        "longitude": -81.814695788461,
+        "confidence": 0.9,
+        "aliases": ["us 41", "u.s. 41", "tamiami trail"],
+    },
+    "Coconut Road": {
+        "location_type": "Road",
+        "address": "Coconut Road from US 41 to Via Coconut Point, Estero, FL",
+        "latitude": 26.398474495578,
+        "longitude": -81.808064278126,
+        "confidence": 0.9,
+        "aliases": ["coconut road"],
+    },
+    "Via Coconut Point": {
+        "location_type": "Road",
+        "address": "Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL",
+        "latitude": 26.420479,
+        "longitude": -81.806570,
+        "confidence": 0.9,
+        "aliases": ["via coconut point", "via coconut"],
+    },
+    "Broadway Avenue": {
+        "location_type": "Road",
+        "address": "Broadway Avenue at US 41, Estero, FL",
+        "latitude": 26.44194750881,
+        "longitude": -81.811011983925,
+        "confidence": 0.9,
+        "aliases": ["broadway avenue"],
+    },
+    "River Ranch Road": {
+        "location_type": "Road",
+        "address": "River Ranch Road from Williams Road to Corkscrew Road, Estero, FL",
+        "latitude": 26.425785502152,
+        "longitude": -81.794620501714,
+        "confidence": 0.9,
+        "aliases": ["river ranch road"],
+    },
+    "River Oaks Preserve": {
+        "location_type": "Park",
+        "address": "River Oaks Preserve, Estero, FL",
+        "latitude": 26.4420079,
+        "longitude": -81.7993579,
+        "confidence": 1.0,
+        "aliases": ["river oaks preserve", "river oaks"],
+    },
+    "Estero River": {
+        "location_type": "General Area",
+        "address": "Estero River near Old Estero and Koreshan State Park, Estero, FL",
+        "latitude": 26.4360313,
+        "longitude": -81.8217353,
+        "confidence": 0.9,
+        "aliases": ["estero river"],
+    },
+    "Coconut Point": {
+        "location_type": "Development",
+        "address": "Coconut Point, Estero, FL",
+        "latitude": 26.4038818,
+        "longitude": -81.8077365,
+        "confidence": 0.9,
+        "aliases": ["coconut point", "coconut point mall"],
+    },
+    "Miromar Outlets": {
+        "location_type": "Development",
+        "address": "Miromar Outlets, Estero, FL",
+        "latitude": 26.438084,
+        "longitude": -81.772808,
+        "confidence": 1.0,
+        "aliases": ["miromar outlets", "miromar mall"],
+    },
+    "Koreshan State Park": {
+        "location_type": "Park",
+        "address": "Koreshan State Park, Estero, FL",
+        "latitude": 26.4368409,
+        "longitude": -81.8180833,
+        "confidence": 1.0,
+        "aliases": ["koreshan state park", "koreshan"],
+    },
+    "Hertz Arena": {
+        "location_type": "Development",
+        "address": "Hertz Arena, Estero, FL",
+        "latitude": 26.440541,
+        "longitude": -81.77872,
+        "confidence": 1.0,
+        "aliases": ["hertz arena"],
+    },
+    "Bella Terra": {
+        "location_type": "Neighborhood",
+        "address": "Bella Terra, Estero, FL",
+        "latitude": None,
+        "longitude": None,
+        "aliases": ["bella terra"],
+    },
+    "Stoneybrook": {
+        "location_type": "Neighborhood",
+        "address": "Stoneybrook, Estero, FL",
+        "latitude": 26.4298062,
+        "longitude": -81.7679548,
+        "confidence": 0.9,
+        "aliases": ["stoneybrook"],
+    },
+    "Pelican Sound": {
+        "location_type": "Neighborhood",
+        "address": "Pelican Sound, Estero, FL",
+        "latitude": None,
+        "longitude": None,
+        "aliases": ["pelican sound"],
+    },
+    "The Brooks": {
+        "location_type": "Neighborhood",
+        "address": "The Brooks, Estero, FL",
+        "latitude": 26.3926426,
+        "longitude": -81.7753764,
+        "confidence": 0.9,
+        "aliases": ["the brooks"],
+    },
+    "Shadow Wood": {
+        "location_type": "Neighborhood",
+        "address": "Shadow Wood, Estero, FL",
+        "latitude": 26.4099337,
+        "longitude": -81.7949565,
+        "confidence": 0.9,
+        "aliases": ["shadow wood"],
+    },
+    "University Village": {
+        "location_type": "Development",
+        "address": "University Village, Estero, FL",
+        "latitude": None,
+        "longitude": None,
+        "aliases": ["university village"],
+    },
+    "Genova": {
+        "location_type": "Development",
+        "address": "21450 Strada Nuova Circle, Estero, FL",
+        "latitude": 26.428168875365,
+        "longitude": -81.804317441678,
+        "confidence": 1.0,
+        "aliases": ["genova"],
+    },
+    "Tidewater": {
+        "location_type": "Neighborhood",
+        "address": "Tidewater, Estero, FL",
+        "latitude": None,
+        "longitude": None,
+        "aliases": ["tidewater"],
+    },
+    "WildBlue": {
+        "location_type": "Neighborhood",
+        "address": "WildBlue, Estero, FL",
+        "latitude": None,
+        "longitude": None,
+        "aliases": ["wildblue", "wild blue"],
+    },
+    "Summercrest": {
+        "location_type": "Development",
+        "address": "Summercrest, Estero, FL",
+        "latitude": None,
+        "longitude": None,
+        "aliases": ["summercrest", "toll brothers development"],
+    },
+}
+
+
+SITE_LOCATION_OVERRIDES: dict[str, dict[str, object]] = {
+    # PZDB items below describe project sites by intersection, named parcel,
+    # or site address. These overrides prevent broad road/community aliases
+    # from producing multiple generic map points for one project.
+    "DOS2018-E005": {
+        "address": "The Colonnade / Estero Townhomes site, 9301 Corkscrew Road, Estero, FL",
+        "latitude": 26.432264859989,
+        "longitude": -81.801155452524,
+        "confidence": 1.0,
+    },
+    "DCI2024-E003": {
+        "address": "Estero Townhomes EPD site, 9301 Corkscrew Road, Estero, FL",
+        "latitude": 26.432264859989,
+        "longitude": -81.801155452524,
+        "confidence": 1.0,
+    },
+    "DCI2022-E006": {
+        "address": "9000 Williams Road, Estero, FL",
+        "latitude": 26.420956750596,
+        "longitude": -81.80311832661,
+        "confidence": 1.0,
+    },
+    "DOS2021-E009": {
+        "address": "9501 Spring Run Boulevard, Estero, FL",
+        "latitude": 26.395734095199,
+        "longitude": -81.797042452636,
+        "confidence": 1.0,
+    },
+    "DCI2021-E002": {
+        "address": "Miromar Outlets, Estero, FL",
+        "latitude": 26.438084,
+        "longitude": -81.772808,
+        "confidence": 1.0,
+    },
+    "DCI2021-E004": {
+        "address": "10081 Estero Town Commons Place, Estero, FL",
+        "latitude": 26.430921743825,
+        "longitude": -81.785430080157,
+        "confidence": 1.0,
+    },
+    "CPA2022-E002": {
+        "address": "8801 Corkscrew Road, Estero, FL",
+        "latitude": 26.434598214195,
+        "longitude": -81.807374237947,
+        "confidence": 1.0,
+    },
+    "DOS2021-E008": {
+        "address": "Corkscrew Pines project site, Estero, FL",
+        "latitude": 26.4383,
+        "longitude": -81.7603,
+        "confidence": 1.0,
+    },
+    "DOS2022-E008": {
+        "address": "Corkscrew Pines project site, Estero, FL",
+        "latitude": 26.4383,
+        "longitude": -81.7603,
+        "confidence": 1.0,
+    },
+    "LDO2022-E051": {
+        "address": "Commons Club at The Brooks, Estero, FL",
+        "latitude": 26.3974648,
+        "longitude": -81.7889557,
+        "confidence": 1.0,
+    },
+    "DCI2022-E005": {
+        "address": "Woodfield Estero project site, northwest corner of US 41 & Coconut Road, Estero, FL",
+        "latitude": 26.4022,
+        "longitude": -81.815,
+        "confidence": 1.0,
+    },
+    "DCI2020-E001": {
+        "address": "Coconut Pointe Residences at Brooks Town Center site, Estero, FL",
+        "latitude": 26.39711,
+        "longitude": -81.78531,
+        "confidence": 1.0,
+    },
+    "ADD2023-E003": {
+        "address": "Marketplace at Coconut Point, 22780 Via Villagio, Estero, FL",
+        "latitude": 26.413657789311,
+        "longitude": -81.811493859539,
+        "confidence": 1.0,
+    },
+    "DOS2023-E005": {
+        "address": "10041 Estero Town Commons Place, Estero, FL",
+        "latitude": 26.4306485776,
+        "longitude": -81.787676765485,
+        "confidence": 1.0,
+    },
+    "DOS2023-E002": {
+        "address": "8801 Corkscrew Road, Estero, FL",
+        "latitude": 26.434598214195,
+        "longitude": -81.807374237947,
+        "confidence": 1.0,
+    },
+    "DOS2023-E010": {
+        "address": "Coconut Pointe Residences at Brooks Town Center site, Estero, FL",
+        "latitude": 26.39711,
+        "longitude": -81.78531,
+        "confidence": 1.0,
+    },
+    "DOS2023-E009": {
+        "address": "Downtown Estero project site, east of US 41 and north of Broadway Avenue East, Estero, FL",
+        "latitude": 26.4432,
+        "longitude": -81.807,
+        "confidence": 1.0,
+    },
+    "DOS2022-E006": {
+        "address": "Downtown Estero project site, east of US 41 and north of Broadway Avenue East, Estero, FL",
+        "latitude": 26.4432,
+        "longitude": -81.807,
+        "confidence": 1.0,
+    },
+    "DOS2022-E009": {
+        "address": "Downtown Estero project site, east of US 41 and north of Broadway Avenue East, Estero, FL",
+        "latitude": 26.4432,
+        "longitude": -81.807,
+        "confidence": 1.0,
+    },
+    "LDO2024-E008": {
+        "address": "Coconut Road & Oakwilde Boulevard, Estero, FL",
+        "latitude": 26.398580002784,
+        "longitude": -81.798864007834,
+        "confidence": 1.0,
+    },
+    "DCI2024-E001": {
+        "address": "8111 Broadway Avenue East, Estero, FL",
+        "latitude": 26.44244610632,
+        "longitude": -81.809993666508,
+        "confidence": 1.0,
+    },
+    "DOS2019-E004": {
+        "address": "8111 Broadway Avenue East, Estero, FL",
+        "latitude": 26.44244610632,
+        "longitude": -81.809993666508,
+        "confidence": 1.0,
+    },
+    "DCI2024-E008": {
+        "address": "8790 Broadway Avenue East, Estero, FL",
+        "latitude": 26.440585868638,
+        "longitude": -81.806135895572,
+        "confidence": 1.0,
+    },
+    "LDO2024-E037": {
+        "address": "Three Oaks Parkway & Oakwilde Boulevard, Estero, FL",
+        "latitude": 26.413073989755,
+        "longitude": -81.785739540023,
+        "confidence": 1.0,
+    },
+    "DOS2024-E002": {
+        "address": "Woodfield Estero project site, northwest corner of US 41 & Coconut Road, Estero, FL",
+        "latitude": 26.4022,
+        "longitude": -81.815,
+        "confidence": 1.0,
+    },
+    "DOS2024-E005": {
+        "address": "Ben Hill Griffin Parkway & Everblades Parkway North, Estero, FL",
+        "latitude": 26.443920189721,
+        "longitude": -81.773684686876,
+        "confidence": 1.0,
+    },
+    "DOS2024-E007": {
+        "address": "9000 Williams Road, Estero, FL",
+        "latitude": 26.420956750596,
+        "longitude": -81.80311832661,
+        "confidence": 1.0,
+    },
+    "DOS2024-E008": {
+        "address": "Summercrest / Estero Townhomes site, 9301 Corkscrew Road, Estero, FL",
+        "latitude": 26.432264859989,
+        "longitude": -81.801155452524,
+        "confidence": 1.0,
+    },
+    "DCI2024-E005": {
+        "address": "Home2 Suites proposed hotel site, Coconut Point Mall, Estero, FL",
+        "latitude": 26.403277778,
+        "longitude": -81.808611111,
+        "confidence": 1.0,
+    },
+    "DOS2022-E001": {
+        "address": "22800 Via Villagio, Estero, FL",
+        "latitude": 26.412588048918,
+        "longitude": -81.811355977231,
+        "confidence": 1.0,
+    },
+    "ADD2025-E005": {
+        "address": "22800 Via Villagio, Estero, FL",
+        "latitude": 26.412588048918,
+        "longitude": -81.811355977231,
+        "confidence": 1.0,
+    },
+    "LDO2025-E020": {
+        "address": "Estero Parkway & Three Oaks Parkway, Estero, FL",
+        "latitude": 26.449389004358,
+        "longitude": -81.788946037082,
+        "confidence": 1.0,
+    },
+    "DOS2025-E006": {
+        "address": "8790 Broadway Avenue East, Estero, FL",
+        "latitude": 26.440585868638,
+        "longitude": -81.806135895572,
+        "confidence": 1.0,
+    },
+}
+
+
+SITE_TEXT_LOCATION_OVERRIDES: list[dict[str, object]] = [
+    {
+        "text": "Corkscrew Road/Puente Lane",
+        "address": "Corkscrew Road & Puente Lane, Estero, FL",
+        "latitude": 26.431386394627,
+        "longitude": -81.784740920078,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Corkscrew Road - Puente Lane",
+        "address": "Corkscrew Road & Puente Lane, Estero, FL",
+        "latitude": 26.431386394627,
+        "longitude": -81.784740920078,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Corkscrew Road (Ben Hill Griffin",
+        "address": "Corkscrew Road from Ben Hill Griffin Parkway to east of Bella Terra Boulevard, Estero, FL",
+        "latitude": 26.443916962688,
+        "longitude": -81.750022322755,
+        "confidence": 0.95,
+    },
+    {
+        "text": "I-75 to Ben Hill Griffin",
+        "address": "Corkscrew Road from I-75 to Ben Hill Griffin Parkway, Estero, FL",
+        "latitude": 26.434333052689,
+        "longitude": -81.774029266916,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Corkscrew Road Stoneybrook Path",
+        "address": "Corkscrew Road at Stoneybrook Golf Drive, Estero, FL",
+        "latitude": 26.439657614771,
+        "longitude": -81.762920730637,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Stoneybrook Sidewalk Easement",
+        "address": "Corkscrew Road at Stoneybrook Golf Drive, Estero, FL",
+        "latitude": 26.439657614771,
+        "longitude": -81.762920730637,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Corkscrew Pines Replat",
+        "address": "Corkscrew Pines project site, Estero, FL",
+        "latitude": 26.4383,
+        "longitude": -81.7603,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Williams Road at Estero High School",
+        "address": "Williams Road at Estero High School, Estero, FL",
+        "latitude": 26.422301,
+        "longitude": -81.798178,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Williams Road & Atlantic Gulf",
+        "address": "Williams Road & Atlantic Gulf Boulevard, Estero, FL",
+        "latitude": 26.420304009887,
+        "longitude": -81.812656010414,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Williams Road and Atlantic Gulf",
+        "address": "Williams Road & Atlantic Gulf Boulevard, Estero, FL",
+        "latitude": 26.420304009887,
+        "longitude": -81.812656010414,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Via Coconut Point & Williams Road",
+        "address": "Williams Road & Via Coconut Point, Estero, FL",
+        "latitude": 26.42047948503,
+        "longitude": -81.806570497251,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Via Coconut Point and Williams Road",
+        "address": "Williams Road & Via Coconut Point, Estero, FL",
+        "latitude": 26.42047948503,
+        "longitude": -81.806570497251,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Williams Road Bicycle",
+        "address": "Williams Road from Via Coconut Point to Three Oaks Parkway, Estero, FL",
+        "latitude": 26.420434746622,
+        "longitude": -81.797464230004,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Williams Road Widening",
+        "address": "Williams Road from US 41 to Via Coconut Point, Estero, FL",
+        "latitude": 26.420397237605,
+        "longitude": -81.80904475125,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Williams Road Easement Acquisition",
+        "address": "Williams Road from US 41 to Via Coconut Point, Estero, FL",
+        "latitude": 26.420397237605,
+        "longitude": -81.80904475125,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Sandy Lane and Via Coconut Point Bridge",
+        "address": "Sandy Lane & Via Coconut Point, Estero, FL",
+        "latitude": 26.431370008006,
+        "longitude": -81.804867965078,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Sandy Lane & Broadway East",
+        "address": "Sandy Lane and Broadway East bicycle/pedestrian improvements, Estero, FL",
+        "latitude": 26.438402,
+        "longitude": -81.80693,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Sandy Lane and Broadway East",
+        "address": "Sandy Lane and Broadway East bicycle/pedestrian improvements, Estero, FL",
+        "latitude": 26.438402,
+        "longitude": -81.80693,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Sandy Lane Path",
+        "address": "Sandy Lane from Corkscrew Road to Broadway Avenue East, Estero, FL",
+        "latitude": 26.43663000848,
+        "longitude": -81.804926512673,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Broadway Avenue East Utilities Extension",
+        "address": "Broadway Avenue East from US 41 to Sandy Lane, Estero, FL",
+        "latitude": 26.441974498538,
+        "longitude": -81.807963485741,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Broadway West UEP",
+        "address": "Broadway Avenue West from US 41 to Pine Tree Lane, Estero, FL",
+        "latitude": 26.441876807456,
+        "longitude": -81.822814751334,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Broadway Ave. West Utility Extension",
+        "address": "Broadway Avenue West from US 41 to Pine Tree Lane, Estero, FL",
+        "latitude": 26.441876807456,
+        "longitude": -81.822814751334,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Broadway Ave. West Safety",
+        "address": "Broadway Avenue West from US 41 to Pine Tree Lane, Estero, FL",
+        "latitude": 26.441876807456,
+        "longitude": -81.822814751334,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Broadway Avenue West design improvements",
+        "address": "Broadway Avenue West from US 41 to Pine Tree Lane, Estero, FL",
+        "latitude": 26.441876807456,
+        "longitude": -81.822814751334,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Ben Hill Griffin Landscape",
+        "address": "Ben Hill Griffin Parkway from Corkscrew Road to Estero Parkway, Estero, FL",
+        "latitude": 26.442888042165,
+        "longitude": -81.772410260408,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Ben Hill Griffin Parkway Improvements",
+        "address": "Ben Hill Griffin Parkway from Corkscrew Road to Estero Parkway, Estero, FL",
+        "latitude": 26.442888042165,
+        "longitude": -81.772410260408,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Estero Parkway Roadway",
+        "address": "Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",
+        "latitude": 26.448792003304,
+        "longitude": -81.803409304378,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Estero Parkway Phase 1 Reuse Main",
+        "address": "Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",
+        "latitude": 26.448792003304,
+        "longitude": -81.803409304378,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Estero Parkway Plant",
+        "address": "Estero Parkway from US 41 to Three Oaks Parkway, Estero, FL",
+        "latitude": 26.448792003304,
+        "longitude": -81.803409304378,
+        "confidence": 0.95,
+    },
+    {
+        "text": "US 41 Median Landscaping (Williams Rd to South of Estero Parkway)",
+        "address": "US 41 from Williams Road to south of Estero Parkway, Estero, FL",
+        "latitude": 26.434255,
+        "longitude": -81.814695788461,
+        "confidence": 0.95,
+    },
+    {
+        "text": "US 41 Medians",
+        "address": "US 41 from Williams Road to Estero Parkway, Estero, FL",
+        "latitude": 26.434255,
+        "longitude": -81.814695788461,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Coconut Road Crosswalks",
+        "address": "Coconut Road from US 41 to Via Coconut Point, Estero, FL",
+        "latitude": 26.398474495578,
+        "longitude": -81.808064278126,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Coconut Road Improvements Study",
+        "address": "Coconut Road from US 41 to Via Coconut Point, Estero, FL",
+        "latitude": 26.398474495578,
+        "longitude": -81.808064278126,
+        "confidence": 0.95,
+    },
+    {
+        "text": "River Ranch Road Improvements",
+        "address": "River Ranch Road from Williams Road to Corkscrew Road, Estero, FL",
+        "latitude": 26.425785502152,
+        "longitude": -81.794620501714,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Estero River North Branch",
+        "address": "Estero River North Branch from Bamboo Island to River Oaks Preserve, Estero, FL",
+        "latitude": 26.4390196,
+        "longitude": -81.8105466,
+        "confidence": 0.9,
+    },
+    {
+        "text": "The Brooks Town Center",
+        "address": "The Brooks Town Center, Estero, FL",
+        "latitude": 26.396617,
+        "longitude": -81.786171,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Shadow Wood Lifestyle Center",
+        "address": "Shadow Wood Country Club Lifestyle Center, Estero, FL",
+        "latitude": 26.407365,
+        "longitude": -81.789795,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Genova Zoning Amendment",
+        "address": "21450 Strada Nuova Circle, Estero, FL",
+        "latitude": 26.428168875365,
+        "longitude": -81.804317441678,
+        "confidence": 1.0,
+    },
+    {
+        "text": "DCI 2015-00009 Genova",
+        "address": "21450 Strada Nuova Circle, Estero, FL",
+        "latitude": 26.428168875365,
+        "longitude": -81.804317441678,
+        "confidence": 1.0,
+    },
+    {
+        "text": "PreK-8 School on Three Oaks Parkway",
+        "address": "20897 Three Oaks Parkway, Estero, FL",
+        "latitude": 26.436576930078,
+        "longitude": -81.784532881242,
+        "confidence": 1.0,
+    },
+    {
+        "text": "20897 Three Oaks Parkway",
+        "address": "20897 Three Oaks Parkway, Estero, FL",
+        "latitude": 26.436576930078,
+        "longitude": -81.784532881242,
+        "confidence": 1.0,
+    },
+    {
+        "text": "21500 Three Oaks Parkway",
+        "address": "21500 Three Oaks Parkway, Estero, FL",
+        "latitude": 26.426449705114,
+        "longitude": -81.788771609677,
+        "confidence": 1.0,
+    },
+    {
+        "text": "9401 Corkscrew Palms Circle",
+        "address": "9401 Corkscrew Palms Circle, Estero, FL",
+        "latitude": 26.430490662544,
+        "longitude": -81.799280001688,
+        "confidence": 1.0,
+    },
+    {
+        "text": "8800 Corkscrew Road",
+        "address": "8800 Corkscrew Road, Estero, FL",
+        "latitude": 26.430882013604,
+        "longitude": -81.807370969005,
+        "confidence": 1.0,
+    },
+    {
+        "text": "8801 Corkscrew Road",
+        "address": "8801 Corkscrew Road, Estero, FL",
+        "latitude": 26.434598214195,
+        "longitude": -81.807374237947,
+        "confidence": 1.0,
+    },
+    {
+        "text": "9000 Williams Road",
+        "address": "9000 Williams Road, Estero, FL",
+        "latitude": 26.420956750596,
+        "longitude": -81.80311832661,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Bella Terra Cell Tower",
+        "address": "19980 Bella Terra Boulevard, Estero, FL",
+        "latitude": 26.450582796918,
+        "longitude": -81.73115952021,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Estero Townhomes EPD (Toll Bros.)",
+        "address": "Summercrest / Estero Townhomes site, 9301 Corkscrew Road, Estero, FL",
+        "latitude": 26.432264859989,
+        "longitude": -81.801155452524,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Village Initiated Rezoning on Williams Road",
+        "address": "9000 Williams Road, Estero, FL",
+        "latitude": 26.420956750596,
+        "longitude": -81.80311832661,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Coconut Road EPD Rezoning",
+        "address": "Woodfield Estero project site, northwest corner of US 41 & Coconut Road, Estero, FL",
+        "latitude": 26.4022,
+        "longitude": -81.815,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Home2 Suites at Coconut Point",
+        "address": "Home2 Suites proposed hotel site, Coconut Point Mall, Estero, FL",
+        "latitude": 26.403277778,
+        "longitude": -81.808611111,
+        "confidence": 1.0,
+    },
+    {
+        "text": "8111 Broadway East",
+        "address": "8111 Broadway Avenue East, Estero, FL",
+        "latitude": 26.44244610632,
+        "longitude": -81.809993666508,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Tidewater Phase 2",
+        "address": "Tidewater by Del Webb, Estero, FL",
+        "latitude": 26.4462,
+        "longitude": -81.7765,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Pelican Sound Residential Planned Development Zoning Amendment",
+        "address": "Pelican Sound Golf & River Club, Estero, FL",
+        "latitude": 26.4360814,
+        "longitude": -81.8298334,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Pelican Sound Zoning Amendment",
+        "address": "Pelican Sound Golf & River Club, Estero, FL",
+        "latitude": 26.4360814,
+        "longitude": -81.8298334,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Hertz Arena property",
+        "address": "11000 Everblades Parkway, Estero, FL",
+        "latitude": 26.440541,
+        "longitude": -81.77872,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Mayfair Village RPD Rezoning",
+        "address": "Mayfair Village site between Broadway Avenue East and Sandy Lane, Estero, FL",
+        "latitude": 26.43890234243,
+        "longitude": -81.805657540358,
+        "confidence": 0.9,
+    },
+    {
+        "text": "Village Initiated Rezoning - 9000 Williams Road Property",
+        "address": "9000 Williams Road, Estero, FL",
+        "latitude": 26.420956750596,
+        "longitude": -81.80311832661,
+        "confidence": 1.0,
+    },
+    {
+        "text": "South Regional Library",
+        "address": "18251 Three Oaks Parkway, Estero, FL",
+        "latitude": 26.433779738905564,
+        "longitude": -81.78952626707927,
+        "confidence": 1.0,
+    },
+    {
+        "text": "DOS2022- E011",
+        "address": "12840 Corkscrew Road, Estero, FL",
+        "latitude": 26.449146368339,
+        "longitude": -81.742899851451,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Island High Rise",
+        "address": "Williams Road & Baybridge Boulevard, Estero, FL",
+        "latitude": 26.419972358933,
+        "longitude": -81.832872657959,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Estero Crossing Residential - Corsa",
+        "address": "10500 Corkscrew Road, Estero, FL",
+        "latitude": 26.430907704137,
+        "longitude": -81.783054229702,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Culver's Coconut Point",
+        "address": "8400 Murano Del Lago Drive, Estero, FL",
+        "latitude": 26.3916729,
+        "longitude": -81.8086935,
+        "confidence": 1.0,
+    },
+    # --- Village parks: pin items to the actual park, not adjacent corridors ---
+    {
+        "text": "Estero Community Park",
+        "address": "Estero Community Park, 9101 Corkscrew Palms Boulevard, Estero, FL",
+        "latitude": 26.422098,
+        "longitude": -81.802186,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Estero Sports Park",
+        "address": "Estero Sports Park, north of Williams Road and east of Via Coconut Point, Estero, FL",
+        "latitude": 26.422098,
+        "longitude": -81.802186,
+        "confidence": 0.95,
+    },
+    # --- NE corner of US 41 & Corkscrew Road: 31.5-acre Village-owned parcel ---
+    # (Ordinance No. 2022-08 rezoned this land from MPD/AG2 to Parks &
+    # Community Facilities; later "Estero River Park" appears in same area.)
+    {
+        "text": "northeast corner of US 41 and Corkscrew Road",
+        "address": "Northeast corner of US 41 and Corkscrew Road, Estero, FL",
+        "latitude": 26.432555,
+        "longitude": -81.808170,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Northeast Corner of US 41 and Corkscrew Road",
+        "address": "Northeast corner of US 41 and Corkscrew Road, Estero, FL",
+        "latitude": 26.432555,
+        "longitude": -81.808170,
+        "confidence": 1.0,
+    },
+    {
+        "text": "northeast corner of US 41 and Corkscrew",
+        "address": "Northeast corner of US 41 and Corkscrew Road, Estero, FL",
+        "latitude": 26.432555,
+        "longitude": -81.808170,
+        "confidence": 1.0,
+    },
+    {
+        "text": "Estero River Park",
+        "address": "Estero River Park (Village property), northeast corner of US 41 and Corkscrew Road, Estero, FL",
+        "latitude": 26.432555,
+        "longitude": -81.808170,
+        "confidence": 1.0,
+    },
+    # --- Via Coconut Point street: avoid collision with the Coconut Point mall ---
+    {
+        "text": "Via Coconut Point Landscape",
+        "address": "Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL",
+        "latitude": 26.420479,
+        "longitude": -81.806570,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Via Coconut Point Improvements",
+        "address": "Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL",
+        "latitude": 26.420479,
+        "longitude": -81.806570,
+        "confidence": 0.95,
+    },
+    {
+        "text": "Via Coconut Point Concept",
+        "address": "Via Coconut Point from Coconut Road to Corkscrew Road, Estero, FL",
+        "latitude": 26.420479,
+        "longitude": -81.806570,
+        "confidence": 0.95,
+    },
+]
+
+
+CATEGORY_DEFINITIONS: list[dict[str, object]] = [
+    {
+        "name": "Residential Development",
+        "description": "Housing, neighborhoods, residential zoning, apartments, townhomes, condos, and related site approvals.",
+        "terms": [
+            "residential planned development", "residential zoning", "residential",
+            "single-family", "single family", "multi-family", "multifamily",
+            "townhome", "townhomes", "apartment", "apartments", "housing",
+            "condominium", "condominiums", "condo",
+            "rpd rezoning", "homeowners association", "pelican sound",
+            "mayfair village", "estero crossing residential", "corsa",
+        ],
+    },
+    {
+        "name": "Commercial & Mixed-Use Development",
+        "description": "Retail, office, hotel, restaurant, storage, entertainment, and mixed-use development items.",
+        "terms": [
+            "commercial planned development", "mixed use", "mixed-use", "mpd",
+            "commercial", "retail", "restaurant", "hotel", "office", "storage",
+            "marketplace", "outlets", "bank", "banking services", "suites",
+            "home2 suites", "culver", "dunkin", "hertz arena", "coconut point",
+            "miromar", "town center", "outdoor consumption on premises",
+        ],
+    },
+    {
+        "name": "Industry, Mining & Agriculture",
+        "description": "Industrial facilities, mining, quarry, agricultural land use, warehousing, manufacturing, distribution, and processing.",
+        "terms": [
+            "industrial", "industrial park", "industrial use", "industrial district",
+            "mining", "rock mining", "extraction", "quarry", "aggregate",
+            "agricultural", "agriculture", "farm", "farming", "agritourism",
+            "rural agricultural", "agricultural land use",
+            "warehouse", "warehousing", "manufacturing", "processing plant",
+            "distribution center", "distribution facility", "logistics",
+            "nursery", "greenhouse",
+        ],
+    },
+    {
+        "name": "Transportation & Mobility",
+        "description": "Roads, bridges, traffic signals, sidewalks, bicycle/pedestrian projects, trails, and right-of-way.",
+        "terms": [
+            "traffic signal", "traffic study", "traffic", "intersection",
+            "right-of-way", "right of way", "road widening", "widening",
+            "bridge", "sidewalk", "bike", "bicycle", "pedestrian", "path",
+            "trail", "rail trail", "bert", "median", "medians", "lane improvement",
+            "roadway", "transportation", "complete streets",
+        ],
+    },
+    {
+        "name": "Utilities, Stormwater & Environment",
+        "description": "Water, wastewater, septic-to-sewer, stormwater, drainage, utility construction, parks, preserves, wetlands, and environmental work.",
+        "terms": [
+            "septic", "sewer", "wastewater", "utility extension", "utilities extension",
+            "uep", "water main", "reuse main", "stormwater", "drainage",
+            "irrigation", "smoke testing", "cctv testing", "wwtp", "package wwtp",
+            "gravity sewer", "lift station", "flood hazard", "flood",
+            "parks", "preserve", "wetland", "wetlands", "mitigation", "conservation",
+            "environmental", "estero river", "estero on the river", "koreshan",
+            "landscaping", "landscape", "trees", "water quality", "monitoring services",
+            "dredging", "sediments",
+        ],
+    },
+    {
+        "name": "Public Facilities & Services",
+        "description": "Village facilities, fire rescue, schools, libraries, elections, public works buildings, and civic services.",
+        "terms": [
+            "village hall", "maintenance building", "public works", "library",
+            "school", "school board", "election", "supervisor of elections",
+            "meeting dates", "anniversary", "facility", "facilities",
+            "south regional library", "fire rescue", "fire station",
+            "emergency management",
+        ],
+    },
+    {
+        "name": "Budget, Contracts & Purchasing",
+        "description": "Budgets, millage, capital improvement planning, financial reports, contracts, grants, and purchasing.",
+        "terms": [
+            "budget", "millage", "capital improvement", "capital improvements",
+            "financial report", "fiscal year", "audit", "banking", "insurance",
+            "reimbursement", "grant", "request for proposal", "rfp", "request for bid",
+            "rfb", "contract", "task authorization", "change order", "purchase",
+        ],
+    },
+    {
+        "name": "Meetings, Records & Public Input",
+        "description": "Agenda approval, minutes, board appointments, presentations, workshops, and public comments.",
+        "terms": [
+            "approval of agenda", "approved agenda", "consent agenda", "meeting minutes",
+            "minutes", "appointment", "appointed", "presentation", "public comment",
+            "public input", "workshop", "discussion", "remote participation",
+            "participate remotely", "excused", "cancelled", "meeting cancelled",
+        ],
+    },
+]
+
+CATEGORY_TERMS: dict[str, list[str]] = {
+    str(definition["name"]): list(definition["terms"])
+    for definition in CATEGORY_DEFINITIONS
+}

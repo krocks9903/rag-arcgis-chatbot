@@ -1,0 +1,59 @@
+name: Pipeline CI
+
+# Fast, offline checks for the pipeline:
+#
+#   pytest over pipeline/tests — parsers, project matchers, and SEMANTIC
+#   validation of the committed data deliverables (schema, referential
+#   integrity, value ranges, geocode sanity). See tests/test_deliverables.py.
+#
+# There is deliberately no byte-exact "rebuild + git diff" build-guard. The
+# pipeline is not bit-reproducible off its runner (live geocode API, OCR), so
+# that guard flapped red even when nothing was actually wrong. Regenerating the
+# data on pipeline-code / PDF changes is handled by pipeline-refresh.yml (it
+# rebuilds and commits on CI); this workflow validates whatever is committed
+# against the invariants that matter, which is fast and deterministic.
+#
+# The `pipeline` branch is listed for fork testing; drop it once this merges
+# upstream.
+
+on:
+  push:
+    branches: [main, pipeline]
+    paths:
+      - "pipeline/**"
+      - "backend/data/**"
+      - "backend/data/bronze/estero_minutes_urls.txt"
+      - ".github/workflows/pipeline-ci.yml"
+  pull_request:
+    paths:
+      - "pipeline/**"
+      - "backend/data/**"
+      - "backend/data/bronze/estero_minutes_urls.txt"
+      - ".github/workflows/pipeline-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (pipeline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r pipeline/requirements.txt
+          pip install pytest
+
+      - name: Run pipeline tests
+        run: python -m pytest pipeline/tests -q

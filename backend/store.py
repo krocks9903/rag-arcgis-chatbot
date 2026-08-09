@@ -15,6 +15,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from rank_bm25 import BM25Okapi
 
 from chunking import rows_to_chunks
+from schema_aliases import load_dataframe
 from config import (
     BM25_FILE,
     CHUNK_SUMMARY_MIN,
@@ -32,8 +33,71 @@ def csv_hash(path: str) -> str:
     return h.hexdigest()
 
 
+_DATE_IN_CHUNK = re.compile(r"meeting_date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+_YEAR_IN_CHUNK = re.compile(r"meeting_year:\s*(20\d{2})", re.IGNORECASE)
+
+
+def _metadata_from_chunk(chunk_id: str, text: str) -> dict[str, Any]:
+    """Recover date fields when reloading a BM25 corpus that only stored text."""
+    meta: dict[str, Any] = {"chunk_id": chunk_id}
+    dm = _DATE_IN_CHUNK.search(text or "")
+    if dm:
+        meta["meeting_date"] = dm.group(1)
+        meta["meeting_year"] = dm.group(1)[:4]
+    else:
+        ym = _YEAR_IN_CHUNK.search(text or "")
+        if ym:
+            meta["meeting_year"] = ym.group(1)
+    return meta
+
+
 def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    """BM25 tokens: drop short/stop words and light-stem simple plurals."""
+    stop = {
+        "are",
+        "is",
+        "was",
+        "were",
+        "there",
+        "any",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "these",
+        "those",
+        "have",
+        "has",
+        "had",
+        "did",
+        "does",
+        "do",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "or",
+        "as",
+        "be",
+        "it",
+    }
+    out: list[str] = []
+    for tok in re.findall(r"[a-z0-9]+", text.lower()):
+        if len(tok) < 3 or tok in stop:
+            continue
+        out.append(tok)
+        if len(tok) > 4 and tok.endswith("s") and not tok.endswith("ss"):
+            stem = tok[:-1]
+            if stem not in stop and len(stem) >= 3:
+                out.append(stem)
+    return out
 
 
 @dataclass
@@ -47,9 +111,18 @@ class DataStore:
     record_count: int = 0
     chunk_count: int = 0
     embeddings: HuggingFaceEmbeddings | None = None
+    _doc_by_id: dict[str, Document] | None = field(default=None, repr=False)
 
     def is_ready(self) -> bool:
         return self.vectorstore is not None and self.bm25 is not None and not self.dataframe.empty
+
+    def doc_by_id(self) -> dict[str, Document]:
+        if self._doc_by_id is None:
+            self._doc_by_id = {
+                d.metadata.get("chunk_id", str(i)): d for i, d in enumerate(self.documents)
+            }
+        return self._doc_by_id
+
 
 
 _store: DataStore | None = None
@@ -113,7 +186,7 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
     )
 
     emb = get_embeddings()
-    df = pd.read_csv(csv_path, encoding="utf-8")
+    df = load_dataframe(csv_path)
     store = DataStore(csv_path=csv_path, dataframe=df, record_count=len(df), embeddings=emb)
 
     if cache_ok:
@@ -123,7 +196,10 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
         store.bm25_ids = ids
         store.bm25 = BM25Okapi([_tokenize(t) for t in corpus])
         store.documents = [
-            Document(page_content=text, metadata={"chunk_id": cid})
+            Document(
+                page_content=text,
+                metadata=_metadata_from_chunk(cid, text),
+            )
             for cid, text in zip(ids, corpus)
         ]
         store.chunk_count = manifest.get("chunk_count", len(store.documents))

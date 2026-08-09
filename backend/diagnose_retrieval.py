@@ -53,7 +53,7 @@ def main() -> None:
         print(f"QUERY: {q!r}")
         print("=" * 100)
 
-        print(f"\n-- RAW similarity_search_with_score (L2 distance, lower=better) --")
+        print("\n-- RAW similarity_search_with_score (L2 distance, lower=better) --")
         raw_hits = vs.similarity_search_with_score(q, k=8)
         for doc, score in raw_hits:
             print(f"  raw={score:8.4f}   {label(doc)}")

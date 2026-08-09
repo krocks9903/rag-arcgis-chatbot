@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install linters
-        run: pip install ruff
+        run: pip install "ruff==0.15.20"
       - name: Ruff lint
         run: ruff check .
       - name: Byte-compile backend

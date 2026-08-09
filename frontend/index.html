@@ -4,10 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ask Engage Estero — Planning & Zoning Decisions</title>
-  <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260726b" />
+  <link rel="preload" as="image" href="assets/hero.webp" type="image/webp" />
 </head>
 <body>
 <header id="topbar">
@@ -21,7 +19,9 @@
   </div>
   <div style="display:flex;align-items:center;gap:10px;">
     <div id="live-badge"><div id="live-dot"></div><span id="record-count">Live data · loading…</span></div>
-    <button id="mobile-map-toggle" class="map-btn" onclick="toggleMobileMap()">🗺 Map</button>
+    <button type="button" id="report-open-btn" class="map-btn" title="Report incorrect data">Report</button>
+    <a id="admin-link" class="map-btn" href="admin.html" title="Administrator console">Admin</a>
+    <button type="button" id="mobile-map-toggle" class="map-btn" onclick="toggleMobileMap()">🗺 Map</button>
   </div>
 </header>
 
@@ -34,27 +34,20 @@
       <h2>Understand Estero's decisions.</h2>
       <p>Ask anything about Planning, Zoning &amp; Design Board meetings — projects, votes, locations, and dates.</p>
       <div id="chips">
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">📅</div><span>What was approved in 2023?</span></div>
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">📍</div><span>What's happening on Corkscrew Road?</span></div>
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">🏢</div><span>Show me rezoning requests</span></div>
-        <div class="chip" onclick="sendChip(this)"><div class="chip-icon">✏️</div><span>What did the board decide about RiverCreek?</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">📅</div><span>What was approved in 2023?</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">📍</div><span>What's happening on Corkscrew Road?</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">🏢</div><span>Show me rezoning requests</span></div>
+        <div class="chip" role="button" tabindex="0" onclick="sendChip(this)"><div class="chip-icon">✏️</div><span>What did the board decide about RiverCreek?</span></div>
       </div>
       </div><!-- /hero-content -->
     </div>
 
     <div id="messages"></div>
 
-    <div id="dataset-bar">
-      <label>📂 Load CSV:</label>
-      <input type="file" id="csv-file-input" accept=".csv" />
-      <button id="load-btn" onclick="loadCSV()">Load Dataset</button>
-      <span id="load-status"></span>
-    </div>
-
     <div id="input-bar">
       <div id="input-wrap">
         <textarea id="question" rows="1" placeholder="Ask about a project, location, year, or decision…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-        <button id="send-btn" onclick="sendMessage()" title="Send">
+        <button type="button" id="send-btn" onclick="sendMessage()" title="Send">
           <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
         </button>
       </div>
@@ -74,15 +67,47 @@
       </div>
     </div>
     <div id="map-label">PZDB_Pilot</div>
-    <div id="viewDiv"></div>
+    <div id="viewDiv">
+      <div id="map-fallback">Loading map…</div>
+    </div>
     <div id="map-footer"><div id="map-footer-dot"></div>Powered by Esri · ArcGIS Online</div>
   </section>
 </div>
-  <script src="https://js.arcgis.com/4.30/"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
-  <script src="config.js"></script>
-  <!-- Production: replace config.js or uncomment and set your Cloud Run URL -->
-  <!-- <script>window.API_BASE = "https://your-service-abc.run.app";</script> -->
-  <script src="app.js"></script>
+
+<dialog id="report-dialog" class="report-dialog">
+  <form id="report-form" method="post" action="#">
+    <header class="report-dialog-head">
+      <h2>Report a data issue</h2>
+      <button type="button" class="report-close" id="report-close-btn" aria-label="Close">×</button>
+    </header>
+    <p class="report-intro">Flag an incorrect location or suggest a change. Reports go to the Engage Estero admin inbox.</p>
+    <label class="report-label" for="report-kind">What is this about?</label>
+    <select id="report-kind" name="kind" required>
+      <option value="incorrect_location">Incorrect location</option>
+      <option value="suggest_change">Suggest a change</option>
+      <option value="other">Other</option>
+    </select>
+    <label class="report-label" for="report-application-id">Application ID (optional)</label>
+    <input id="report-application-id" name="application_id" type="text" maxlength="120" placeholder="e.g. DOS2022-E016" />
+    <label class="report-label" for="report-location">Location (optional)</label>
+    <input id="report-location" name="location" type="text" maxlength="500" placeholder="Address or place shown in the answer" />
+    <label class="report-label" for="report-current">What does it say now? (optional)</label>
+    <input id="report-current" name="current_value" type="text" maxlength="1000" />
+    <label class="report-label" for="report-suggested">What should it say? (optional)</label>
+    <input id="report-suggested" name="suggested_value" type="text" maxlength="1000" />
+    <label class="report-label" for="report-details">Details</label>
+    <textarea id="report-details" name="details" required minlength="5" maxlength="4000" placeholder="Describe the problem or suggested correction…"></textarea>
+    <label class="report-label" for="report-email">Email if we may follow up (optional)</label>
+    <input id="report-email" name="contact_email" type="email" maxlength="254" autocomplete="email" />
+    <div class="report-dialog-actions">
+      <button type="button" class="btn-dir" id="report-cancel-btn">Cancel</button>
+      <button type="submit" class="btn-minutes" id="report-submit-btn">Submit report</button>
+    </div>
+    <p id="report-form-status" class="report-form-status" role="status"></p>
+  </form>
+</dialog>
+
+  <script src="config.js?v=20260715c"></script>
+  <script src="app.js?v=20260726b"></script>
 </body>
 </html>

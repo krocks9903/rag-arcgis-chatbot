@@ -1,8 +1,14 @@
 import type { ChatMessage } from "../../types";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import Message from "./Message";
+import type { ReportPrefill } from "../ReportDialog/ReportDialog";
 
-export default function MessageList({ messages }: { messages: ChatMessage[] }) {
+interface MessageListProps {
+  messages: ChatMessage[];
+  onReport?: (prefill: ReportPrefill) => void;
+}
+
+export default function MessageList({ messages, onReport }: MessageListProps) {
   const { ref, onScroll } = useAutoScroll<HTMLDivElement>([messages]);
 
   return (
@@ -17,7 +23,7 @@ export default function MessageList({ messages }: { messages: ChatMessage[] }) {
       aria-label="Conversation"
     >
       {messages.map((m) => (
-        <Message key={m.id} message={m} />
+        <Message key={m.id} message={m} onReport={onReport} />
       ))}
     </div>
   );
