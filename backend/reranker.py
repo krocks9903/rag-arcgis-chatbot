@@ -16,18 +16,33 @@ only metadata gains "rerank_score" for logging/debug.
 Standalone from retrieval.py/store.py (the unused orchestrator pipeline) —
 same CrossEncoder approach, but no import from that module chain, so this
 stays usable from app.py (the live pipeline) without activating it.
+
+Model default: ms-marco-MiniLM-L-6-v2 (~22M params) rather than
+bge-reranker-base (~278M params) — the same lighter model ci.yml already
+pins for tests. On a contended CPU the heavier model's per-call latency can
+blow up dramatically (observed: 28s for a 2-candidate rerank on a machine
+that should take well under a second); the smaller model gives less room
+for that to happen and is still enough to fix the dense-retrieval ordering
+problem described above. Override via RERANKER_MODEL if you want the
+heavier model's slightly better ranking quality and can afford the latency.
 """
 from __future__ import annotations
 
 import os
 import time
 
+from ingest import strip_header_lines
 from langchain.schema import Document
 from sentence_transformers import CrossEncoder
 
-from ingest import strip_header_lines
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
+# Cross-encoder self-attention cost grows with sequence length — an
+# unusually long chunk (a big article section) can dominate a rerank call's
+# latency on its own. Cap what we feed the model; the model's own tokenizer
+# max_length (512 tokens) would truncate anyway, this just avoids paying for
+# tokenizing/attending over text that gets cut regardless.
+_MAX_CHARS_PER_DOC = 1200
 
 _model: CrossEncoder | None = None
 
@@ -53,7 +68,7 @@ def rerank(query: str, docs: list[Document], top_n: int = 5) -> list[Document]:
         return []
 
     model = get_reranker()
-    pairs = [(query, strip_header_lines(d.page_content)) for d in docs]
+    pairs = [(query, strip_header_lines(d.page_content)[:_MAX_CHARS_PER_DOC]) for d in docs]
 
     t0 = time.perf_counter()
     scores = model.predict(pairs)

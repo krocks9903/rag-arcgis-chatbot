@@ -28,6 +28,9 @@ from config import (
 from store import DataStore, _tokenize
 
 _reranker: CrossEncoder | None = None
+# Cap rerank input length — tokenizer max is ~512 tokens anyway; long article
+# chunks otherwise dominate CPU time (same rationale as backend/reranker.py).
+_MAX_CHARS_PER_DOC = 1200
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
 _DATE_BODY_RE = re.compile(r"meeting_date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 _YEAR_BODY_RE = re.compile(r"meeting_year:\s*(20\d{2})", re.IGNORECASE)
@@ -231,7 +234,7 @@ def hybrid_retrieve(
         return apply_recency_boost(ranked, query, intent_query=intent)[:RERANK_K]
 
     reranker = get_reranker()
-    pairs = [(query, d.page_content) for d in candidates]
+    pairs = [(query, (d.page_content or "")[:_MAX_CHARS_PER_DOC]) for d in candidates]
     scores = reranker.predict(pairs)
     # Always coerce to Python float — numpy.float32 is not JSON-serializable.
     ranked = [(d, float(s)) for d, s in sorted(zip(candidates, scores), key=lambda x: -float(x[1]))]
