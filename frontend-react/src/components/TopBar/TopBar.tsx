@@ -32,6 +32,9 @@ export default function TopBar({
         <button type="button" className="topbar-btn" onClick={onNewChat}>
           + New chat
         </button>
+        <a className="topbar-btn" href="/admin.html" title="Administrator console">
+          Admin
+        </a>
         <div id="live-badge">
           <div id="live-dot" />
           <span id="record-count">{liveLabel}</span>

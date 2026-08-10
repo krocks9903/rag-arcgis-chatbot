@@ -9,17 +9,17 @@ COPY frontend-react/ ./
 ARG VITE_API_BASE=http://localhost:8080
 ENV VITE_API_BASE=$VITE_API_BASE
 RUN npm run build
-COPY frontend/admin.html frontend/admin.js frontend/admin.css frontend/styles.css frontend/config.js ./dist/
-COPY frontend/assets ./dist/assets
+# Admin pages are included from frontend-react/public/ during the Vite build.
 
 FROM nginx:alpine
 COPY --from=build /web/dist /usr/share/nginx/html
-# SPA fallback: unknown paths → index.html (API is on a different host/port).
+# Prefer real files (admin.html, assets) over the SPA fallback.
 RUN printf '%s\n' \
   'server {' \
   '  listen 80;' \
   '  root /usr/share/nginx/html;' \
   '  index index.html;' \
+  '  location = /admin.html { try_files $uri =404; }' \
   '  location / {' \
   '    try_files $uri $uri/ /index.html;' \
   '  }' \

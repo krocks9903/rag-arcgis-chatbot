@@ -14,9 +14,8 @@ COPY frontend-react/ ./
 ENV VITE_API_BASE=
 RUN npm run build
 
-# Admin console + assets (vanilla) — linked from /admin.html
-COPY frontend/admin.html frontend/admin.js frontend/admin.css frontend/styles.css frontend/config.js ./dist/
-COPY frontend/assets ./dist/assets
+# Admin HTML/JS/CSS ship via frontend-react/public/ → dist/ during Vite build.
+# (No extra COPY needed; keep logo assets that public/ already includes.)
 
 # ─── API + baked index ──────────────────────────────────────────────────
 FROM python:3.11-slim
