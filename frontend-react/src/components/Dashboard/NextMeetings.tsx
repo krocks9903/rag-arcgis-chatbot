@@ -57,7 +57,7 @@ export default function NextMeetings({ meetings, loading, error }: NextMeetingsP
 
       <a
         className="pulse-widget-link"
-        href="https://estero-fl.gov/agendas-minutes/"
+        href="https://estero-fl.gov/meetings/"
         target="_blank"
         rel="noopener noreferrer"
       >

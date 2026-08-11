@@ -12,7 +12,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -39,7 +39,12 @@ vectorstore = None
 _embeddings = None
 board_df: "pd.DataFrame | None" = None
 
-BOARD_CSV = "data/data.csv"
+# PZDB board records now come from the same gold export as Village Council
+# (meetings_ai_public.csv, 334 PZDB rows) instead of the older, pre-filtered
+# data.csv (103 rows, AiReady==True only). This intentionally includes
+# unreviewed rows (AiReady is not checked here — see board_documents() in
+# ingest.py) for broader coverage; data.csv is no longer read by default.
+BOARD_CSV = "data/meetings_ai_public.csv"
 WEBSITE_CSV = "data/esterotoday_content.csv"
 VILLAGE_COUNCIL_CSV = "data/meetings_ai_public.csv"
 INDEX_DIR = "faiss_index"
@@ -47,7 +52,7 @@ MANIFEST_FILE = os.path.join(INDEX_DIR, "manifest.json")
 
 # Bump this whenever the chunk schema/metadata shape changes so cached indexes
 # from before the change are treated as stale and rebuilt.
-CACHE_VERSION = "v4-village-council"
+CACHE_VERSION = "v5-pzdb-from-gold"
 
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.35"))
 RETRIEVE_K = int(os.getenv("RETRIEVE_K", "12"))
@@ -262,27 +267,99 @@ def _article_card(doc) -> dict:
     }
 
 
-def build_card(passing: list[tuple]) -> Optional[dict]:
-    """Only ever build a card from verified chunk metadata — never from LLM text.
+def _card_identity(md: dict) -> Optional[str]:
+    """Identity used to gate + dedup a board/village-council card.
 
-    A board/village-council card requires the *top-scoring* passing chunk to
-    be that source type with a real RecordId. Anything else (top chunk is an
-    article, or a record chunk with no RecordId) falls through to an article
-    card, and if nothing passing is a linkable article either, no card is
-    emitted at all.
+    KNOWN INCONSISTENCY (documented per request, not silently resolved):
+    SYSTEM_PROMPT rule 3 tells the LLM to cite ApplicationId ("Cite the
+    ApplicationId shown in a context block ... for every project fact"), but
+    ApplicationId is frequently blank in the source data — procedural agenda
+    items (e.g. "Approval of Agenda", a consent-agenda minutes approval) have
+    no application tied to them. RecordId, by contrast, is guaranteed
+    non-empty for every board_record/village_council chunk that ever makes it
+    into the index: ingest.py's board_documents() and
+    village_council_documents() both skip any row with no RecordId before
+    it's embedded (see "Never index a row we can't cite back to a real
+    record" in ingest.py). So RecordId is the authoritative identifier for
+    gating/dedup here; ApplicationId is only a fallback (defensive — RecordId
+    missing shouldn't be reachable for these source types) and is never
+    required on its own.
     """
-    if not passing:
+    return md.get("record_id") or md.get("application_id") or None
+
+
+def _card_date(card: dict) -> Optional[datetime]:
+    """meeting_date for board/village-council cards, publish_date for articles."""
+    raw = card.get("meeting_date") or card.get("publish_date")
+    if not raw:
         return None
-    top_doc, _ = passing[0]
-    top_type = top_doc.metadata.get("source_type")
-    if top_type == "board_record" and top_doc.metadata.get("record_id"):
-        return _board_card(top_doc.metadata)
-    if top_type == "village_council" and top_doc.metadata.get("record_id"):
-        return _village_council_card(top_doc.metadata)
+    ts = pd.to_datetime(raw, errors="coerce")
+    return None if pd.isna(ts) else ts.to_pydatetime()
+
+
+def build_cards(passing: list[tuple]) -> list[tuple[dict, Any]]:
+    """Build one card per verified, uniquely-identified source in `passing`.
+
+    Every card's identity and link come straight from retrieved chunk
+    metadata — never from LLM output text (the LLM only ever sees this data
+    to write prose; cards are assembled independently here, from `passing`,
+    not from anything the model generated). A source that fails gating is
+    dropped silently — never rendered as a placeholder or dead-end card:
+      - board_record / village_council: needs _card_identity(md) (RecordId,
+        falling back to ApplicationId) AND a real primary_source_url.
+      - website_article: needs a real article url.
+
+    `passing` already arrives de-duplicated to one chunk per underlying
+    document (retrieve()'s _dedupe_key runs on the full candidate pool before
+    threshold filtering / reranking ever sees it), but this function dedupes
+    again explicitly — defense in depth, and it's also what collapses the
+    rare case of one long record split into multiple chunks by
+    _chunk_pieces() that both survive into `passing`.
+
+    Returns (card, source_doc) pairs — the doc is kept alongside its card so
+    callers can build a matching "Sources" footer entry from the same chunk —
+    sorted newest-first by the card's date. A card with no parseable date
+    sorts last, never first.
+    """
+    seen: set[tuple] = set()
+    out: list[tuple[dict, Any]] = []
     for doc, _ in passing:
-        if doc.metadata.get("source_type") == "website_article" and doc.metadata.get("url"):
-            return _article_card(doc)
-    return None
+        md = doc.metadata
+        source_type = md.get("source_type")
+        if source_type in ("board_record", "village_council"):
+            identity = _card_identity(md)
+            url = md.get("primary_source_url")
+            if not identity or not url:
+                continue
+            key = ("record", source_type, identity)
+            if key in seen:
+                continue
+            seen.add(key)
+            card = _board_card(md) if source_type == "board_record" else _village_council_card(md)
+            out.append((card, doc))
+        elif source_type == "website_article":
+            url = md.get("url")
+            if not url:
+                continue
+            key = ("article", url)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((_article_card(doc), doc))
+    out.sort(key=lambda pair: _card_date(pair[0]) or datetime.min, reverse=True)
+    return out
+
+
+def _format_source(doc) -> str:
+    label = doc.metadata.get("source_type", "record")
+    if label == "website_article":
+        prefix = "📰 "
+    elif label == "village_council":
+        prefix = "🏘️ "
+    else:
+        prefix = "🏛 "
+    snippet = ingest.strip_header_lines(doc.page_content)[:280]
+    return prefix + snippet
 
 
 # System turn: static identity + hard rules, rewritten for a stronger
@@ -359,24 +436,16 @@ def answer_question(question: str) -> "ChatResponse":
     # strip any fence the model writes anyway despite rule 9.
     prose = _STRAY_FENCE_RE.sub("", prose).strip()
 
-    card = build_card(passing)
+    cards_with_docs = build_cards(passing)
+    cards = [c for c, _ in cards_with_docs]
     answer = prose
-    if card:
-        answer = f"{prose}\n\n```json\n{json.dumps(card, ensure_ascii=False)}\n```"
+    if cards:
+        answer = f"{prose}\n\n```json\n{json.dumps(cards, ensure_ascii=False)}\n```"
 
-    sources = []
-    for doc, _ in passing[:4]:
-        label = doc.metadata.get("source_type", "record")
-        if label == "website_article":
-            prefix = "📰 "
-        elif label == "village_council":
-            prefix = "🏘️ "
-        else:
-            prefix = "🏛 "
-        snippet = ingest.strip_header_lines(doc.page_content)[:280]
-        src = prefix + snippet
-        if src not in sources:
-            sources.append(src)
+    # One source line per card, same order — keeps the "Sources (N)" footer's
+    # N equal to the actual number of cards (rendered + collapsed), not an
+    # independently-capped/deduped count of raw retrieved chunks.
+    sources = [_format_source(doc) for _, doc in cards_with_docs]
 
     return ChatResponse(answer=answer, sources=sources)
 

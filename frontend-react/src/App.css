@@ -25,29 +25,18 @@
   flex-shrink: 0;
   filter: brightness(0) invert(1);
 }
-#topbar-divider {
-  width: 1px;
-  height: 32px;
-  background: rgba(255, 255, 255, 0.25);
-  margin: 0 4px;
-  flex-shrink: 0;
-}
 #topbar-title {
   min-width: 0;
   overflow: hidden;
 }
 #topbar-title h1 {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
   color: #fff;
   line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-#topbar-title p {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
 }
 #topbar-right {
   display: flex;
@@ -265,6 +254,24 @@
 }
 .btn-copy:hover {
   border-color: var(--navy);
+  color: var(--navy);
+}
+.btn-showmore {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 10px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.btn-showmore:hover {
+  border-color: var(--navy);
+  border-style: solid;
   color: var(--navy);
 }
 
@@ -827,9 +834,6 @@
   }
   /* Decorative/secondary text trimmed for space; interactive controls and
      their accessible names (New chat, health status) are always kept. */
-  #topbar-title p {
-    display: none;
-  }
   #live-badge {
     display: none;
   }

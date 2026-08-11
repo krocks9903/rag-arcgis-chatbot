@@ -18,7 +18,7 @@ interface RightPanelProps {
  * hidden, never unmounted) — re-initializing the ArcGIS MapView is expensive
  * and would lose pan/zoom state, per the design brief. */
 export default function RightPanel({ expanded, onToggleExpand, mobileVisible, onRecordCount, onSend }: RightPanelProps) {
-  const [activeTab, setActiveTab] = useState<RightTab>("map");
+  const [activeTab, setActiveTab] = useState<RightTab>("pulse");
   const { meetings, loading: meetingsLoading, error: meetingsError, hasUpcomingWithinWeek } = useMeetings(3);
 
   useEffect(() => {

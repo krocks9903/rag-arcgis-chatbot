@@ -81,7 +81,8 @@ def _chunk_pieces(header: str, body: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────
-# Board records (data.csv — "meetings_ai_public" gold schema)
+# Board records (PZDB rows from the meetings_ai_public gold schema, whichever
+# file is passed as board_csv — see BOARD_CSV in app.py)
 # ─────────────────────────────────────────────
 def board_documents(df: pd.DataFrame) -> list[Document]:
     docs: list[Document] = []
@@ -95,10 +96,14 @@ def board_documents(df: pd.DataFrame) -> list[Document]:
             # board card out of thin air.
             continue
 
-        if _nonempty(fields.get("SourceBoard")).lower() == "council":
-            # Village Council rows in data.csv are superseded by the reviewed,
-            # geocoded vc: records in village_council_documents() — indexing
-            # both would surface the same real meeting as two different cards.
+        if _nonempty(fields.get("SourceBoard")).lower() != "pzdb":
+            # Allowlist, not a blocklist: board_documents() only ever means
+            # "PZDB records." Older exports label Village Council rows
+            # "council"; meetings_ai_public.csv labels them "vc" instead — a
+            # blocklist keyed to one label silently let the other slip through
+            # and get double-indexed here AND in village_council_documents()
+            # (same meeting, two different card types). Allowlisting "pzdb"
+            # is correct regardless of which label scheme the file uses.
             continue
 
         application_id = row_value(fields, "application_id")

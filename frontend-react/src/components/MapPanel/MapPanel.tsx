@@ -1,16 +1,21 @@
 import { useEffect, useState } from "react";
-import { setMapView } from "../../lib/mapViewStore";
+import { setMapView, registerMapPanTarget, type MapPanTarget } from "../../lib/mapViewStore";
 
 // Esri "Nearby" Instant App wrapping webmap 84a56d2f741d49f5a70c547923fb45d5
 // (same webmap this panel used to load directly via the JS SDK). Embedding
 // the hosted app itself — not the raw webmap — was a deliberate choice: it
 // picks up the app's own theme/search config, at the cost of native SDK
-// control. See mapViewStore.ts: every pan/capture/restore call there already
-// no-ops safely when there's no live MapView (setMapView is never called
-// here), so "Show on map" on a chat card still switches to this tab, it just
-// can't zoom to the specific coordinates inside an opaque cross-origin iframe.
+// control (no MapView to call .goTo() on for a cross-origin iframe). "Show
+// on map" on a chat card instead drives the iframe's own center/level URL
+// parameters (Esri's documented Instant Apps deep-link params — see
+// mapViewStore.ts's panToCoords) so panning still works without one.
 const INSTANT_APP_ID = "90d68fdd2de841b295cc1c3cfd6df524";
-const INSTANT_APP_URL = `https://eccl-swfl-safety.maps.arcgis.com/apps/instant/nearby/index.html?appid=${INSTANT_APP_ID}`;
+const INSTANT_APP_BASE_URL = `https://eccl-swfl-safety.maps.arcgis.com/apps/instant/nearby/index.html?appid=${INSTANT_APP_ID}`;
+
+function buildMapUrl(target: MapPanTarget | null): string {
+  if (!target) return INSTANT_APP_BASE_URL;
+  return `${INSTANT_APP_BASE_URL}&center=${target.lng},${target.lat}&level=${target.zoom}`;
+}
 
 // The app's underlying feature layer is public on its own, so the record
 // count in TopBar ("Live data · N records") can still be queried directly —
@@ -26,11 +31,16 @@ interface MapPanelProps {
 
 export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: MapPanelProps) {
   const [loadError, setLoadError] = useState(false);
+  const [panTarget, setPanTarget] = useState<MapPanTarget | null>(null);
+  const mapUrl = buildMapUrl(panTarget);
 
   useEffect(() => {
-    // No live MapView to hand out from an iframe — clear any stale reference
-    // so "Show on map" etc. degrade to their already-safe no-op path.
+    // No live MapView to hand out from an iframe — clear any stale reference.
     setMapView(null);
+    // Let mapViewStore's panToCoords() drive our iframe src (see MapPanel
+    // comment above and mapViewStore.ts) — this is what makes "Show on map"
+    // actually pan instead of no-op.
+    registerMapPanTarget(setPanTarget);
 
     let cancelled = false;
     fetch(RECORD_COUNT_URL)
@@ -49,9 +59,16 @@ export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: Ma
 
     return () => {
       cancelled = true;
+      registerMapPanTarget(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A new pan target means a fresh iframe navigation — give it its own
+  // chance to fail/succeed rather than carrying over a stale error banner.
+  useEffect(() => {
+    setLoadError(false);
+  }, [panTarget]);
 
   return (
     <section id="map-panel">
@@ -67,7 +84,7 @@ export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: Ma
           <button type="button" className="map-btn" id="expand-btn" onClick={onToggleExpand}>
             {expanded ? "⤡ Collapse" : "⤢ Expand"}
           </button>
-          <a className="map-btn" href={INSTANT_APP_URL} target="_blank" rel="noopener noreferrer">
+          <a className="map-btn" href={mapUrl} target="_blank" rel="noopener noreferrer">
             ↗ Open
           </a>
         </div>
@@ -76,7 +93,7 @@ export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: Ma
       {loadError && (
         <div id="map-error-banner" role="alert">
           ⚠️ The map failed to load.{" "}
-          <a href={INSTANT_APP_URL} target="_blank" rel="noopener noreferrer">
+          <a href={mapUrl} target="_blank" rel="noopener noreferrer">
             Open it directly on ArcGIS Online
           </a>
           .
@@ -85,7 +102,7 @@ export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: Ma
       <iframe
         id="viewDiv"
         title="Estero Board Records map"
-        src={INSTANT_APP_URL}
+        src={mapUrl}
         // Cross-origin iframe: this can catch a hard network/navigation
         // failure, but not an error the Esri app renders inside its own
         // page — that's invisible to us. The "Open directly" link above is

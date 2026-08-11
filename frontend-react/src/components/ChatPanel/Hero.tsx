@@ -7,8 +7,8 @@ export default function Hero() {
       <div id="hero-bg" style={{ backgroundImage: `url(${heroBg})` }} />
       <div id="hero-content">
         <img id="hero-logo" src={logo} alt="Engage Estero" />
-        <h2>Understand Estero's decisions.</h2>
-        <p>Ask anything about Planning, Zoning &amp; Design Board meetings — projects, votes, locations, and dates.</p>
+        <h2>Understand Estero development.</h2>
+        <p>Search for projects, roads, neighborhoods, votes, and dates across Village records and local news.</p>
       </div>
     </div>
   );

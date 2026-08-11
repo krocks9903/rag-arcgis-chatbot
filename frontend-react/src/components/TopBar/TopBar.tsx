@@ -17,10 +17,8 @@ export default function TopBar({
     <header id="topbar">
       <div id="topbar-left">
         <img id="topbar-logo" src={logo} alt="Engage Estero" />
-        <div id="topbar-divider" />
         <div id="topbar-title">
           <h1>Ask Engage Estero</h1>
-          <p>Planning &amp; Zoning Decisions · Village of Estero</p>
         </div>
       </div>
       <div id="topbar-right">

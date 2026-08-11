@@ -37,15 +37,30 @@ export function openDirections(address: string): void {
   void panToAddress(address);
 }
 
+export interface MapPanTarget {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
+// MapPanel embeds an Esri Instant App in a cross-origin iframe rather than a
+// native ArcGIS JS API MapView (see MapPanel.tsx) — there is no `view` to
+// call .goTo() on, so currentView above is always null in the current
+// architecture and panToCoords below can't use it. Instead, MapPanel
+// registers a setter here on mount (same singleton pattern as
+// registerTabSwitcher in uiStore.ts) and panToCoords drives the iframe's src
+// via the Instant App's own center/level URL parameters.
+let panTargetSetter: ((target: MapPanTarget) => void) | null = null;
+
+export function registerMapPanTarget(fn: ((target: MapPanTarget) => void) | null): void {
+  panTargetSetter = fn;
+}
+
 /** Pan/zoom straight to known coordinates — no geocoding round-trip needed.
  * Used by the chat card "Show on map" link, which already has lat/lng from
  * the board record's own metadata. */
 export function panToCoords(lat: number, lng: number, zoom = 16): void {
-  const view = currentView;
-  if (!view) return;
-  view.goTo({ center: [lng, lat], zoom }).catch(() => {
-    // view may still be mid-resize right after a tab switch — best-effort only
-  });
+  panTargetSetter?.({ lat, lng, zoom });
 }
 
 interface ViewState {

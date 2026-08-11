@@ -13,8 +13,11 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+const VISIBLE_CARDS = 4;
+
 export default function Message({ message }: { message: ChatMessage }) {
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (message.role === "user") {
     return (
@@ -28,6 +31,8 @@ export default function Message({ message }: { message: ChatMessage }) {
   }
 
   const cards = message.cards || [];
+  const visibleCards = expanded ? cards : cards.slice(0, VISIBLE_CARDS);
+  const hiddenCount = cards.length - visibleCards.length;
   const showTyping = !!message.streaming && !message.prose && cards.length === 0;
   const hasContent = !!message.prose || cards.length > 0;
   const finished = !message.streaming;
@@ -54,7 +59,7 @@ export default function Message({ message }: { message: ChatMessage }) {
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.prose}</ReactMarkdown>
             </div>
           )}
-          {cards.map((c, i) =>
+          {visibleCards.map((c, i) =>
             isArticle(c) ? (
               <ArticleCard key={i} card={c} />
             ) : c.sourceType === "village_council" ? (
@@ -62,6 +67,11 @@ export default function Message({ message }: { message: ChatMessage }) {
             ) : (
               <ProjectCard key={i} card={c} />
             ),
+          )}
+          {finished && hiddenCount > 0 && (
+            <button type="button" className="btn-showmore" onClick={() => setExpanded(true)}>
+              Show {hiddenCount} more source{hiddenCount === 1 ? "" : "s"}
+            </button>
           )}
           {finished && !hasContent && !message.error && <div>Sorry, I couldn't find an answer.</div>}
           {finished && <SourcesList sources={message.sources || []} />}
