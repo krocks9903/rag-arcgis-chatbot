@@ -72,24 +72,43 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> list[tuple
     return sorted(scores.items(), key=lambda x: -x[1])
 
 
-def document_meeting_date(doc: Document) -> date | None:
-    """Resolve a meeting date from metadata or chunk text."""
-    raw = str(doc.metadata.get("meeting_date") or "").strip()
-    for candidate in (raw,):
-        if not candidate:
+_DATE_HEADER_RE = re.compile(r"^DATE:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE | re.MULTILINE)
+
+
+def _parse_iso_like_date(raw: str) -> date | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text[:10], fmt).date()
+        except ValueError:
             continue
-        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
-            try:
-                return datetime.strptime(candidate[:10], fmt).date()
-            except ValueError:
-                continue
+    return None
+
+
+def document_meeting_date(doc: Document) -> date | None:
+    """Resolve a source date from metadata or chunk text.
+
+    Covers board/council ``meeting_date`` and EsteroToday ``publish_date`` /
+    generic ``date`` so article chunks get the same recency treatment.
+    """
+    for key in ("meeting_date", "publish_date", "date"):
+        parsed = _parse_iso_like_date(str(doc.metadata.get(key) or ""))
+        if parsed:
+            return parsed
+
     text = doc.page_content or ""
+    header = _DATE_HEADER_RE.search(text)
+    if header:
+        parsed = _parse_iso_like_date(header.group(1))
+        if parsed:
+            return parsed
     m = _DATE_BODY_RE.search(text) or _ISO_RE.search(text)
     if m:
-        try:
-            return datetime.strptime(m.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            pass
+        parsed = _parse_iso_like_date(m.group(1))
+        if parsed:
+            return parsed
     yraw = str(doc.metadata.get("meeting_year") or "").strip()
     ym = _YEAR_BODY_RE.search(text)
     year_s = yraw or (ym.group(1) if ym else "")
@@ -99,6 +118,31 @@ def document_meeting_date(doc: Document) -> date | None:
         except ValueError:
             return None
     return None
+
+
+def sort_hits_newest_first(
+    ranked: list[tuple[Document, float]],
+    *,
+    by_date_primary: bool = False,
+) -> list[tuple[Document, float]]:
+    """Order hits so newer sources come first.
+
+    by_date_primary=False (ranking): score primary, newest date breaks ties.
+    by_date_primary=True (context/citations): newest dated sources first so
+    the model references recent articles before older ones.
+    """
+    if len(ranked) < 2:
+        return ranked
+
+    def _key(item: tuple[Document, float]) -> tuple:
+        doc, score = item
+        d = document_meeting_date(doc)
+        date_key = -(d.toordinal()) if d else 0
+        if by_date_primary:
+            return (0 if d else 1, date_key, -float(score))
+        return (-float(score), date_key)
+
+    return sorted(ranked, key=_key)
 
 
 def recency_score(meeting: date | None, *, today: date | None = None) -> float:
@@ -154,9 +198,13 @@ def apply_recency_boost(
         # Keep original score on metadata for debugging.
         doc.metadata["recency"] = round(r, 4)
         if meeting:
+            # Normalize into meeting_date for downstream meta/cards; articles
+            # also land here via publish_date resolution above.
             doc.metadata["meeting_date"] = meeting.isoformat()
+            if not doc.metadata.get("date"):
+                doc.metadata["date"] = meeting.isoformat()
         rescored.append((doc, float(score) + weight * r))
-    rescored = sorted(rescored, key=lambda x: -x[1])
+    rescored = sort_hits_newest_first(rescored)
     return prefer_recent_hits(rescored, intent, today=today)
 
 
@@ -187,7 +235,7 @@ def prefer_recent_hits(
         elif meeting >= cutoff:
             fresh.append((doc, score))
     if fresh:
-        return fresh
+        return sort_hits_newest_first(fresh)
     if undated:
         return undated
     return []
@@ -310,7 +358,10 @@ def scope_hits_to_project(
 def format_docs(hits: list[tuple[Document, float]]) -> str:
     if not hits:
         return "No relevant records found in the dataset."
-    return "\n\n--- RECORD ---\n\n".join(d.page_content for d, _ in hits)
+    # Present newest sources first in the prompt context so the model cites
+    # recent articles/meetings before older ones.
+    ordered = sort_hits_newest_first(list(hits), by_date_primary=True)
+    return "\n\n--- RECORD ---\n\n".join(d.page_content for d, _ in ordered)
 
 
 def best_score(hits: list[tuple[Document, float]]) -> float:

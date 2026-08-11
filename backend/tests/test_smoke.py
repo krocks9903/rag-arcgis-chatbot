@@ -329,6 +329,59 @@ def test_filter_projects_for_recency_sorts_newest_first():
     assert [p.id for p in kept] == ["B", "A"]
 
 
+def test_filter_projects_always_sorts_newest_without_recent_cue():
+    from models import ProjectOut
+    from rag_path import filter_projects_for_recency
+
+    a = ProjectOut(title="A", id="A", date="2022-01-01")
+    b = ProjectOut(title="B", id="B", date="2025-06-01")
+    kept = filter_projects_for_recency("What happened on Corkscrew Road?", [a, b])
+    assert [p.id for p in kept] == ["B", "A"]
+
+
+def test_document_date_reads_article_publish_date():
+    from langchain.schema import Document
+    from retrieval import document_meeting_date, format_docs
+
+    older = Document(
+        page_content="DATE: 2022-01-15\nSOURCE_TYPE: website_article\nold story",
+        metadata={
+            "chunk_id": "old-art",
+            "source_type": "website_article",
+            "publish_date": "2022-01-15",
+            "date": "2022-01-15",
+        },
+    )
+    newer = Document(
+        page_content="DATE: 2025-11-01\nSOURCE_TYPE: website_article\nnew story",
+        metadata={
+            "chunk_id": "new-art",
+            "source_type": "website_article",
+            "publish_date": "2025-11-01",
+            "date": "2025-11-01",
+        },
+    )
+    assert document_meeting_date(newer).isoformat() == "2025-11-01"
+    ctx = format_docs([(older, 0.9), (newer, 0.5)])
+    assert ctx.index("2025-11-01") < ctx.index("2022-01-15")
+
+
+def test_recency_boost_prefers_newer_article_publish_date():
+    from langchain.schema import Document
+    from retrieval import apply_recency_boost
+
+    older = Document(
+        page_content="DATE: 2019-03-01\narticle",
+        metadata={"chunk_id": "old", "publish_date": "2019-03-01", "date": "2019-03-01"},
+    )
+    newer = Document(
+        page_content="DATE: 2025-08-01\narticle",
+        metadata={"chunk_id": "new", "publish_date": "2025-08-01", "date": "2025-08-01"},
+    )
+    ranked = apply_recency_boost([(older, 1.0), (newer, 1.0)], "Estero news", boost=0.5)
+    assert ranked[0][0].metadata["chunk_id"] == "new"
+
+
 def test_recent_intent_blocks_keyword_shortcut():
     from keyword_path import is_strong_keyword_hit
     from models import ChatResponse, ProjectOut
