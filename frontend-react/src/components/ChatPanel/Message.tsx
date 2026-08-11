@@ -8,6 +8,7 @@ import ArticleCard from "./ArticleCard";
 import VillageCouncilCard from "./VillageCouncilCard";
 import SourcesList from "./SourcesList";
 import TypingIndicator from "./TypingIndicator";
+import FeedbackBar from "./FeedbackBar";
 import type { ReportPrefill } from "../ReportDialog/ReportDialog";
 
 function formatTime(ts: number): string {
@@ -72,6 +73,7 @@ export default function Message({
           )}
           {finished && !hasContent && !message.error && <div>Sorry, I couldn't find an answer.</div>}
           {finished && <SourcesList sources={message.sources || []} />}
+          {finished && !message.error && <FeedbackBar message={message} />}
           {finished && message.prose && (
             <div className="msg-actions">
               <button type="button" className="btn-copy" onClick={copyAnswer}>

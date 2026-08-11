@@ -30,6 +30,11 @@ export interface ChatMessage {
   sources?: string[];
   streaming?: boolean;
   error?: boolean;
+  /** Original user question — used when posting thumbs feedback. */
+  question?: string;
+  route?: string;
+  feedbackMeta?: Record<string, unknown>;
+  feedbackRating?: "up" | "down";
 }
 
 export interface ChatApiResponse {
@@ -39,6 +44,8 @@ export interface ChatApiResponse {
   projects?: unknown[];
   articles?: unknown[];
   sources?: string[];
+  route?: string;
+  meta?: Record<string, unknown>;
 }
 
 export interface StreamDonePayload {
@@ -47,6 +54,8 @@ export interface StreamDonePayload {
   projects?: unknown[];
   articles?: unknown[];
   sources?: string[];
+  route?: string;
+  meta?: Record<string, unknown>;
 }
 
 // ─────────────────────────────────────────────
