@@ -1,7 +1,10 @@
 .env
-.venv
+venv/
+.venv/
 __pycache__/
 *.pyc
 faiss_index/
 tests/
 .git/
+logs/
+data/reports.json

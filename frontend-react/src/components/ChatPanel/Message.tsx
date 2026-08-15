@@ -8,6 +8,7 @@ import ArticleCard from "./ArticleCard";
 import VillageCouncilCard from "./VillageCouncilCard";
 import SourcesList from "./SourcesList";
 import TypingIndicator from "./TypingIndicator";
+import type { ReportPrefill } from "../ReportDialog/ReportDialog";
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -15,7 +16,12 @@ function formatTime(ts: number): string {
 
 const VISIBLE_CARDS = 4;
 
-export default function Message({ message }: { message: ChatMessage }) {
+interface MessageProps {
+  message: ChatMessage;
+  onReport?: (prefill: ReportPrefill) => void;
+}
+
+export default function Message({ message, onReport }: MessageProps) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -63,9 +69,9 @@ export default function Message({ message }: { message: ChatMessage }) {
             isArticle(c) ? (
               <ArticleCard key={i} card={c} />
             ) : c.sourceType === "village_council" ? (
-              <VillageCouncilCard key={i} card={c} />
+              <VillageCouncilCard key={i} card={c} onReport={onReport} />
             ) : (
-              <ProjectCard key={i} card={c} />
+              <ProjectCard key={i} card={c} onReport={onReport} />
             ),
           )}
           {finished && hiddenCount > 0 && (

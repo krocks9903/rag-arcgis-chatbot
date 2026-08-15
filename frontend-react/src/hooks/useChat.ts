@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { API_BASE } from "../lib/config";
+import { apiHeaders } from "../lib/deviceId";
 import {
   cleanProse,
   extractJsonCards,
@@ -91,7 +92,7 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
   try {
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(),
       body: JSON.stringify({ question }),
     });
 

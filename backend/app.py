@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import re
@@ -9,18 +8,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Any, Optional
 
-from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
-
 import ingest
+import indexer
+from admin_auth import ADMIN_API_KEY, require_admin
 from events import router as events_router
+from indexer import RERANK_ENABLED, build_rag_chain
 from llm_provider import generate
-from reranker import get_reranker, rerank
+from models import ReportCreate, ReportOut, ReportStatusUpdate
+from rate_limit import enforce_rate_limit
+from reports import create_report, list_reports, report_counts, update_report
+from reranker import RERANKER_MODEL, rerank
 from schema_aliases import row_value
 
 app = FastAPI(title="Estero Development Chatbot API")
@@ -35,32 +38,12 @@ app.add_middleware(
 
 app.include_router(events_router)
 
-vectorstore = None
-_embeddings = None
-board_df: "pd.DataFrame | None" = None
-
-# PZDB board records now come from the same gold export as Village Council
-# (meetings_ai_public.csv, 334 PZDB rows) instead of the older, pre-filtered
-# data.csv (103 rows, AiReady==True only). This intentionally includes
-# unreviewed rows (AiReady is not checked here — see board_documents() in
-# ingest.py) for broader coverage; data.csv is no longer read by default.
-BOARD_CSV = "data/meetings_ai_public.csv"
-WEBSITE_CSV = "data/esterotoday_content.csv"
-VILLAGE_COUNCIL_CSV = "data/meetings_ai_public.csv"
-INDEX_DIR = "faiss_index"
-MANIFEST_FILE = os.path.join(INDEX_DIR, "manifest.json")
-
-# Bump this whenever the chunk schema/metadata shape changes so cached indexes
-# from before the change are treated as stale and rebuilt.
-CACHE_VERSION = "v5-pzdb-from-gold"
-
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.35"))
 RETRIEVE_K = int(os.getenv("RETRIEVE_K", "12"))
 
 # Cross-encoder reranking (see reranker.py). Set RERANK_ENABLED=false for an
 # instant rollback to pre-rerank behavior — with it false, retrieve() and
 # answer_question() are byte-identical to the original top-RETRIEVE_K flow.
-RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() not in {"0", "false", "no"}
 RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "20"))
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "5"))
 
@@ -77,74 +60,6 @@ class ChatResponse(BaseModel):
 
 class LoadRequest(BaseModel):
     csv_path: str
-
-
-# ─────────────────────────────────────────────
-# Index build / cache
-# ─────────────────────────────────────────────
-def get_embeddings() -> HuggingFaceEmbeddings:
-    global _embeddings
-    if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            encode_kwargs={"batch_size": 64, "normalize_embeddings": True},
-        )
-    return _embeddings
-
-
-def _csv_digest(*paths: str) -> str:
-    h = hashlib.md5()
-    h.update(CACHE_VERSION.encode("utf-8"))
-    for p in paths:
-        if os.path.exists(p):
-            with open(p, "rb") as f:
-                h.update(f.read())
-    return h.hexdigest()
-
-
-def build_rag_chain(board_csv: str = BOARD_CSV, website_csv: str = WEBSITE_CSV, vc_csv: str = VILLAGE_COUNCIL_CSV):
-    global vectorstore, board_df
-
-    if os.path.exists(board_csv):
-        board_df = pd.read_csv(board_csv, encoding="utf-8")
-
-    digest = _csv_digest(board_csv, website_csv, vc_csv)
-    manifest = {}
-    if os.path.exists(MANIFEST_FILE):
-        with open(MANIFEST_FILE, encoding="utf-8") as f:
-            manifest = json.load(f)
-
-    embeddings = get_embeddings()
-
-    if manifest.get("digest") == digest and os.path.isdir(INDEX_DIR):
-        print(f"Cache hit — loading FAISS index ({manifest.get('chunk_count')} chunks)")
-        vectorstore = FAISS.load_local(INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
-    else:
-        print("Building chunks from CSV sources…")
-        docs = ingest.build_documents(board_csv, website_csv, vc_csv)
-        if not docs:
-            raise ValueError("No data files found in data/ folder")
-        print(f"Indexing {len(docs)} chunks…")
-        vectorstore = FAISS.from_documents(docs, embeddings)
-        os.makedirs(INDEX_DIR, exist_ok=True)
-        vectorstore.save_local(INDEX_DIR)
-        with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                {"digest": digest, "chunk_count": len(docs), "cache_version": CACHE_VERSION},
-                f,
-                indent=2,
-            )
-        print("FAISS index built and saved.")
-
-    # LLM generation no longer goes through a client built here — llm_provider
-    # validates LLM_PROVIDER and constructs the selected provider's client
-    # once at import time (see llm_provider.py). If that failed, this module
-    # itself would never have finished importing.
-
-    if RERANK_ENABLED:
-        get_reranker()  # load once at startup, not on the first request
-
-    print("RAG backend ready.")
 
 
 # ─────────────────────────────────────────────
@@ -169,7 +84,7 @@ def retrieve(question: str) -> list[tuple]:
     step that reorders this pool afterward.
     """
     k = RERANK_CANDIDATES if RERANK_ENABLED else RETRIEVE_K
-    hits = vectorstore.similarity_search_with_relevance_scores(question, k=k)
+    hits = indexer.vectorstore.similarity_search_with_relevance_scores(question, k=k)
     hits.sort(key=lambda x: x[1], reverse=True)
     seen: set[tuple] = set()
     deduped = []
@@ -459,9 +374,9 @@ async def startup():
 
 
 @app.post("/load")
-async def load_csv(req: LoadRequest):
+async def load_csv(req: LoadRequest, _: None = Depends(require_admin)):
     """Swap the board-records CSV. Website content always stays in the index."""
-    path = f"data/{req.csv_path}"
+    path = f"{indexer.DATA_DIR}/{req.csv_path}"
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:
@@ -472,8 +387,8 @@ async def load_csv(req: LoadRequest):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
-    if vectorstore is None:
+async def chat(req: ChatRequest, _: None = Depends(enforce_rate_limit("chat"))):
+    if indexer.vectorstore is None:
         raise HTTPException(status_code=503, detail="No data loaded yet.")
     try:
         return answer_question(req.question)
@@ -481,12 +396,53 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=traceback.format_exc())
 
 
+@app.post("/reports", response_model=ReportOut)
+async def submit_report(payload: ReportCreate, _: None = Depends(enforce_rate_limit("public_write"))):
+    """Public: flag an incorrect location or suggest a data change."""
+    try:
+        return create_report(payload)
+    except Exception:
+        raise HTTPException(status_code=500, detail=traceback.format_exc())
+
+
+@app.get("/admin")
+async def admin_redirect():
+    return RedirectResponse(url="/admin.html", status_code=307)
+
+
+@app.get("/admin/status")
+async def admin_status(_: None = Depends(require_admin)):
+    return {
+        "status": "ok",
+        "admin_configured": bool(ADMIN_API_KEY),
+        "index_loaded": indexer.vectorstore is not None,
+        "record_count": 0 if indexer.board_df is None else len(indexer.board_df),
+        "embedding_model": indexer.EMBEDDING_MODEL,
+        "reranker_model": RERANKER_MODEL if RERANK_ENABLED else None,
+        "board_csv": indexer.BOARD_CSV,
+        "reports": report_counts(),
+    }
+
+
+@app.get("/admin/reports", response_model=list[ReportOut])
+async def admin_list_reports(status: str | None = None, _: None = Depends(require_admin)):
+    return list_reports(status=status)
+
+
+@app.patch("/admin/reports/{report_id}", response_model=ReportOut)
+async def admin_update_report(report_id: str, payload: ReportStatusUpdate, _: None = Depends(require_admin)):
+    try:
+        return update_report(report_id, payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Report not found") from None
+
+
 @app.get("/health")
 async def health():
     # LLM readiness is no longer a runtime toggle here: llm_provider validates
     # LLM_PROVIDER and constructs its client at import time, so if this
     # process is running at all, the LLM provider is already ready.
-    return {"status": "ok", "index_loaded": vectorstore is not None}
+    return {"status": "ok", "index_loaded": indexer.vectorstore is not None}
 
 
 @app.get("/recent-decisions")
@@ -494,10 +450,10 @@ async def recent_decisions():
     """5 most recent board decisions with a ProjectName, newest MeetingDate first.
     Powers the Community Pulse dashboard's Recent Decisions widget — reads from
     the board CSV already loaded into memory, no re-indexing involved."""
-    if board_df is None:
+    if indexer.board_df is None:
         raise HTTPException(status_code=503, detail="No board data loaded yet.")
 
-    df = board_df.copy()
+    df = indexer.board_df.copy()
     name_col = "ProjectName" if "ProjectName" in df.columns else None
     if name_col:
         df = df[df[name_col].notna() & (df[name_col].astype(str).str.strip() != "")]

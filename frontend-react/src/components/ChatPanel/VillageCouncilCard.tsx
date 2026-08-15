@@ -2,8 +2,14 @@ import type { NormalizedCard } from "../../types";
 import { statusClass, statusEmoji } from "../../lib/parseAnswer";
 import { openDirections, panToCoords } from "../../lib/mapViewStore";
 import { switchToTab } from "../../lib/uiStore";
+import type { ReportPrefill } from "../ReportDialog/ReportDialog";
 
-export default function VillageCouncilCard({ card }: { card: NormalizedCard }) {
+interface VillageCouncilCardProps {
+  card: NormalizedCard;
+  onReport?: (prefill: ReportPrefill) => void;
+}
+
+export default function VillageCouncilCard({ card, onReport }: VillageCouncilCardProps) {
   const meta = [card.id, card.location].filter(Boolean).join(" · ");
   const minutesUrl = card.pdfUrl || card.documentUrl;
   const hasCoords = card.lat !== null && card.lng !== null;
@@ -49,6 +55,22 @@ export default function VillageCouncilCard({ card }: { card: NormalizedCard }) {
         {hasCoords && (
           <button type="button" className="btn-showmap" onClick={showOnMap}>
             🧭 Show on map
+          </button>
+        )}
+        {onReport && (
+          <button
+            type="button"
+            className="btn-report"
+            onClick={() =>
+              onReport({
+                kind: card.location ? "incorrect_location" : "suggest_change",
+                application_id: card.id || "",
+                location: card.location || "",
+                current_value: card.location || card.title || "",
+              })
+            }
+          >
+            ⚑ Report
           </button>
         )}
       </div>
