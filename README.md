@@ -161,12 +161,12 @@ Meeting minutes are only part of the corpus. Every other content type published 
 esterotoday.com is synced through a connector registry in `backend/sources/` and
 indexed alongside the gold CSV:
 
-| Source | `source_type` | CSV |
-| --- | --- | --- |
-| News posts | `website_article` | `data/engage_estero/posts.csv` |
-| Site pages | `website_page` | `data/engage_estero/pages.csv` |
-| Events | `event` | `data/engage_estero/events.csv` |
-| PDF documents | `document` | `data/engage_estero/documents.csv` |
+| Source | `source_type` | CSV | Indexed |
+| --- | --- | --- | --- |
+| News posts | `website_article` | `data/engage_estero/posts.csv` | yes |
+| Site pages | `website_page` | `data/engage_estero/pages.csv` | yes |
+| PDF documents | `document` | `data/engage_estero/documents.csv` | yes |
+| Events | `event` | `data/engage_estero/events.csv` | no — answered live by `events_path.py` |
 
 ```bash
 python backend/scripts/sync_engage_estero.py                      # all sources

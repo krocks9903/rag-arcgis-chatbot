@@ -152,6 +152,15 @@ def test_registry_covers_every_discovered_content_type():
     assert len(set(types)) == len(types)
 
 
+def test_events_are_synced_but_not_indexed():
+    """events_path answers upcoming events live; indexing them would go stale."""
+    from sources import SPECS_BY_KEY, enabled_specs
+
+    assert SPECS_BY_KEY["events"].index_by_default is False
+    assert "events" not in {spec.key for spec in enabled_specs()}
+    assert {"posts", "pages", "documents"} <= {spec.key for spec in enabled_specs()}
+
+
 def test_legacy_article_csv_is_backfilled(tmp_path):
     """Rows synced before the registry lack record_id/source_type."""
     import csv

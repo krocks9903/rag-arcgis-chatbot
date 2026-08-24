@@ -34,6 +34,10 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         source_type="event",
         label="Community and Village events",
         csv_name="events.csv",
+        # Upcoming events are answered live by events_path.answer_upcoming_events
+        # via /api/events. Baking them into a weekly-rebuilt index would let the
+        # bot cite events that have already happened, so sync but do not index.
+        index_by_default=False,
     ),
     SourceSpec(
         key="documents",
@@ -47,10 +51,10 @@ SPECS_BY_KEY = {spec.key: spec for spec in SOURCE_SPECS}
 
 
 def enabled_specs() -> list[SourceSpec]:
-    """Specs allowed by ENABLED_SOURCE_KEYS (empty setting means all)."""
-    if not ENABLED_SOURCE_KEYS:
-        return list(SOURCE_SPECS)
-    return [spec for spec in SOURCE_SPECS if spec.key in ENABLED_SOURCE_KEYS]
+    """Specs to index. ENABLED_SOURCE_KEYS is an explicit override."""
+    if ENABLED_SOURCE_KEYS:
+        return [spec for spec in SOURCE_SPECS if spec.key in ENABLED_SOURCE_KEYS]
+    return [spec for spec in SOURCE_SPECS if spec.index_by_default]
 
 
 def resolve_csv(spec: SourceSpec, base_dir: str = ENGAGE_ESTERO_DIR) -> str | None:

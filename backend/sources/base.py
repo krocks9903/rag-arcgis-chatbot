@@ -65,6 +65,8 @@ class SourceSpec:
     csv_name: str
     # Older CSV kept for backwards compatibility, read when csv_name is absent.
     legacy_csv: str | None = None
+    # Sync it, but keep it out of the RAG index unless asked for explicitly.
+    index_by_default: bool = True
 
     def csv_path(self, base_dir: str) -> str:
         return os.path.join(base_dir, self.csv_name)

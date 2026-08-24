@@ -71,6 +71,16 @@ SOURCE_SPECS = (
 Adding a source means appending one `SourceSpec` and one fetch function. The sync
 CLI, the index wiring, cache invalidation, and tests all pick it up automatically.
 
+### 2b. Synced is not the same as indexed
+
+Events are the exception to "index everything." `events_path.answer_upcoming_events`
+answers event questions live from `/api/events`, which aggregates EsteroToday,
+FGCU athletics, and a manual JSON fallback. Baking upcoming events into an index
+that rebuilds weekly would let the bot cite events that already happened, so the
+events spec sets `index_by_default=False`: the CSV is still synced for archival
+and analysis, but retrieval leaves it alone. Override with
+`ENABLED_SOURCE_KEYS=posts,pages,events,documents`.
+
 ### 3. Storage layout
 
 ```
