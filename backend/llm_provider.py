@@ -1,17 +1,12 @@
-"""Provider-agnostic LLM generation layer — the ONE place that talks to an
-LLM API for answer generation.
+"""Provider-agnostic LLM generation layer — optional Anthropic/Groq helpers.
 
-Call sites must go through generate(); nothing outside this module should
-construct an Anthropic or Groq client directly. That keeps provider
-selection, retries, and usage accounting in exactly one place.
+Primary RAG answers use Gemini (extract) + Groq (summary) via rag_path.py.
+Claude Haiku is reserved for the optional CRAG query-rewrite job
+(``rag_path._haiku_rewrite_query``) when ANTHROPIC_API_KEY is set — a cheaper
+task than full answer generation.
 
-Backend is chosen once, at import time, via the LLM_PROVIDER env var
-("anthropic" — the default — or "groq"). An unrecognized value raises
-immediately at import (i.e. at process startup), not on the first request.
-The selected provider's client is constructed once here at module level and
-reused for the life of the process; generate() never fails over between
-providers on its own — a failure is raised loudly as LLMProviderError so it
-shows up in logs instead of silently degrading to the other backend.
+This module remains available for scripts/diagnostics that call generate()
+directly. Call sites that need answer generation should prefer rag_path.
 """
 from __future__ import annotations
 

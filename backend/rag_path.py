@@ -356,16 +356,28 @@ def filter_projects_for_query(question: str, projects: list[ProjectOut]) -> list
 
 
 def filter_projects_for_recency(question: str, projects: list[ProjectOut]) -> list[ProjectOut]:
-    """When the user asks for recent/new items, drop older project cards.
+    """Prefer newest project/article cards; harden when user asks for recent.
 
-    Never restores known-old dated cards: fresh → undated → empty.
-    Fresh cards are sorted newest-first.
+    Always sorts dated cards newest-first so citations lead with recent sources.
+    When the question asks for recent/new/latest, also drop cards older than
+    RECENT_QUERY_MAX_AGE_YEARS (fresh → undated → empty).
     """
-    if not projects or not query_wants_recent(question):
+    if not projects:
         return projects
+
+    def _newest_first(items: list[ProjectOut]) -> list[ProjectOut]:
+        return sorted(
+            items,
+            key=lambda p: parse_source_date(p.date) or date.min,
+            reverse=True,
+        )
+
+    if not query_wants_recent(question):
+        return _newest_first(list(projects))
+
     years = RECENT_QUERY_MAX_AGE_YEARS
     if years <= 0:
-        return projects
+        return _newest_first(list(projects))
     cutoff = date.today() - timedelta(days=int(years * 365.25))
     kept: list[ProjectOut] = []
     undated: list[ProjectOut] = []
@@ -376,11 +388,7 @@ def filter_projects_for_recency(question: str, projects: list[ProjectOut]) -> li
         elif d >= cutoff:
             kept.append(p)
     if kept:
-        kept.sort(
-            key=lambda p: parse_source_date(p.date) or date.min,
-            reverse=True,
-        )
-        result = kept
+        result = _newest_first(kept)
     elif undated:
         result = undated
     else:
@@ -414,13 +422,60 @@ def grade_context(hits: list[tuple[Document, float]]) -> str:
 def rewrite_query(question: str) -> str:
     """Expand a weak query for a CRAG retry without injecting bare years.
 
-    Bare years would trip query_wants_recent's year detector if intent were
-    derived from the rewrite; we still avoid them for cleaner retrieval text.
+    Prefer Claude Haiku when configured (cheap rewrite job). Otherwise use
+    the deterministic rule-based expansion. Bare years are avoided so they
+    cannot trip query_wants_recent if intent were derived from the rewrite.
     """
+    haiku = _haiku_rewrite_query(question)
+    if haiku:
+        return haiku
     base = f"{question.strip()} Estero Florida planning zoning design board"
     if query_wants_recent(question):
         return f"{base} recent planning meetings last two years"
-    return base
+    return f"{base} newest articles recent coverage"
+
+
+def _haiku_rewrite_query(question: str) -> str | None:
+    """Optional Haiku job: rewrite a weak RAG query toward recent Estero sources."""
+    from config import ENABLE_HAIKU_REWRITE, HAIKU_REWRITE_MODEL
+
+    if not ENABLE_HAIKU_REWRITE:
+        return None
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=HAIKU_REWRITE_MODEL,
+            max_tokens=120,
+            temperature=0,
+            system=(
+                "Rewrite the citizen question into one short English search query "
+                "for Village of Estero planning/zoning records and EsteroToday articles. "
+                "Prefer terms that surface the newest coverage. "
+                "Do not invent years. Reply with the query only — no quotes or preamble."
+            ),
+            messages=[{"role": "user", "content": question.strip()}],
+        )
+        text = ""
+        for block in msg.content:
+            if getattr(block, "type", None) == "text":
+                text += block.text
+        cleaned = " ".join((text or "").strip().split())
+        if not cleaned or len(cleaned) < 8:
+            return None
+        # Guard against year injection that would disable recent-mode intent.
+        if re.search(r"\b20\d{2}\b", cleaned) and not re.search(r"\b20\d{2}\b", question):
+            cleaned = re.sub(r"\b20\d{2}\b", "", cleaned)
+            cleaned = " ".join(cleaned.split())
+        logger.info("Haiku CRAG rewrite: %r -> %r", question[:80], cleaned[:120])
+        return cleaned
+    except Exception as exc:  # noqa: BLE001 — fall back to rules
+        logger.warning("Haiku rewrite unavailable (%s); using rule-based rewrite", exc)
+        return None
 
 
 def retrieve_with_crag(store: DataStore, question: str) -> tuple[str, dict[str, Any]]:

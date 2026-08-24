@@ -8,7 +8,7 @@ RULES — follow exactly:
 4. Quote application IDs and outcomes only when present in Context.
 5. document_url must be copied exactly from Document_Link — never invent URLs.
 6. status must be one of: Approved, Denied, Continued, or No decision recorded.
-7. At most 3 projects. When the question asks for recent/new/latest items, prefer newest meeting dates.
+7. At most 3 projects. Always list newest date first, then older. Prefer newest articles/meeting dates before older ones. When the question asks for recent/new/latest items, omit older records unless nothing newer is in the Context.
 8. Records sharing the same project_id are the same project; only attribute an action to a project when its record's project_id matches — never infer shared identity from a common road, location, or keyword.
 9. Only include a project if its title, ApplicationID, or location clearly matches the question.
 

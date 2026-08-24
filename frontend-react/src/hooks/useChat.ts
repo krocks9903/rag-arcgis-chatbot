@@ -34,7 +34,11 @@ function focusMapOnCards(cards: NormalizedCard[]): void {
 
 type Setter = React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 
-type StreamEvent = { type: "token"; text?: string } | StreamDonePayload | { type: "error"; detail?: string };
+type StreamEvent =
+  | { type: "token"; text?: string }
+  | { type: "meta"; route?: string; llm_mode?: string; [key: string]: unknown }
+  | StreamDonePayload
+  | { type: "error"; detail?: string };
 
 function patchMessage(setMessages: Setter, id: string, patch: Partial<ChatMessage>) {
   setMessages((msgs) => msgs.map((m) => (m.id === id ? { ...m, ...patch } : m)));
@@ -94,6 +98,8 @@ async function tryStreamChat(question: string, botId: string, setMessages: Sette
         patchMessage(setMessages, botId, { prose: liveProse(fullText), streaming: true });
       } else if (payload.type === "done") {
         donePayload = payload;
+      } else if (payload.type === "meta" && "route" in payload && payload.route) {
+        patchMessage(setMessages, botId, { route: String(payload.route) });
       } else if (payload.type === "error") {
         patchMessage(setMessages, botId, {
           prose: "⚠️ " + (payload.detail || "Stream error"),
@@ -117,6 +123,8 @@ async function tryStreamChat(question: string, botId: string, setMessages: Sette
     cards,
     sources: donePayload?.sources || [],
     streaming: false,
+    route: donePayload?.route,
+    feedbackMeta: donePayload?.meta,
   });
   focusMapOnCards(cards);
   return true;
@@ -144,7 +152,14 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
 
     if (data.projects || data.articles || data.summary) {
       const { prose, cards } = parseStructuredResponse(data);
-      patchMessage(setMessages, botId, { prose, cards, sources: data.sources || [], streaming: false });
+      patchMessage(setMessages, botId, {
+        prose,
+        cards,
+        sources: data.sources || [],
+        streaming: false,
+        route: data.route,
+        feedbackMeta: data.meta,
+      });
       focusMapOnCards(cards);
       return;
     }
@@ -159,7 +174,14 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
       });
       return;
     }
-    patchMessage(setMessages, botId, { prose, cards, sources: data.sources || [], streaming: false });
+    patchMessage(setMessages, botId, {
+      prose,
+      cards,
+      sources: data.sources || [],
+      streaming: false,
+      route: data.route,
+      feedbackMeta: data.meta,
+    });
     focusMapOnCards(cards);
   } catch {
     patchMessage(setMessages, botId, {
@@ -186,7 +208,14 @@ export function useChat() {
 
     const userMsg: ChatMessage = { id: makeId(), role: "user", text: q, timestamp: Date.now() };
     const botId = makeId();
-    const botMsg: ChatMessage = { id: botId, role: "bot", timestamp: Date.now(), streaming: true, prose: "" };
+    const botMsg: ChatMessage = {
+      id: botId,
+      role: "bot",
+      timestamp: Date.now(),
+      streaming: true,
+      prose: "",
+      question: q,
+    };
     setMessages((m) => [...m, userMsg, botMsg]);
 
     try {

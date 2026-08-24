@@ -39,14 +39,19 @@ SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.25"))
 CRAG_MAX_ITERS = int(os.getenv("CRAG_MAX_ITERS", "1"))
 CHUNK_SUMMARY_MIN = int(os.getenv("CHUNK_SUMMARY_MIN", "200"))
 ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "true").lower() not in {"0", "false", "no"}
-# Prefer newer meeting records in RAG ranking (0 disables).
+# Prefer newer meeting/article records in RAG ranking (0 disables).
 ENABLE_RECENCY_BOOST = os.getenv("ENABLE_RECENCY_BOOST", "true").lower() not in {"0", "false", "no"}
-RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.35"))
-# Days until a record's recency score halves (≈3 years).
-RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "1095"))
+# Default boost is strong enough that, with equal relevance, a newer article
+# outranks an older one even when the user did not say "recent".
+RECENCY_BOOST = float(os.getenv("RECENCY_BOOST", "0.55"))
+# Days until a record's recency score halves (≈2 years — favors current coverage).
+RECENCY_HALF_LIFE_DAYS = float(os.getenv("RECENCY_HALF_LIFE_DAYS", "730"))
 # Conversational "recent/new/latest" queries: stronger boost + hard age window.
-RECENT_QUERY_BOOST = float(os.getenv("RECENT_QUERY_BOOST", "1.25"))
+RECENT_QUERY_BOOST = float(os.getenv("RECENT_QUERY_BOOST", "1.5"))
 RECENT_QUERY_MAX_AGE_YEARS = float(os.getenv("RECENT_QUERY_MAX_AGE_YEARS", "3"))
+# Optional: Claude Haiku rewrites weak CRAG queries (falls back to rules if unset).
+ENABLE_HAIKU_REWRITE = os.getenv("ENABLE_HAIKU_REWRITE", "true").lower() not in {"0", "false", "no"}
+HAIKU_REWRITE_MODEL = os.getenv("HAIKU_REWRITE_MODEL", "claude-haiku-4-5-20251001")
 
 # Project-scoped retrieval: when the top hits converge on one project (via the
 # ProjectId grouping key from the gold corpus), expand to that project's full

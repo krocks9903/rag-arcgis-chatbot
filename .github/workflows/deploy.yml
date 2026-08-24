@@ -6,6 +6,7 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "frontend-react/**"
       - "backend/data/gold/meetings_ai_public.csv"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/pipeline-refresh.yml"
