@@ -127,8 +127,11 @@ rag-arcgis-chatbot/
 │   ├── app.py                  # FastAPI + admin/reports + optional static UI
 │   ├── admin_auth.py / reports.py
 │   ├── store.py                # FAISS + BM25 index
+│   ├── sources/                # Engage Estero content connectors (registry)
+│   ├── scripts/sync_engage_estero.py  # sync posts/pages/events/documents
 │   ├── data/gold/meetings_ai_public.csv
-│   ├── data/esterotoday_content.csv   # EsteroToday articles (React Pulse / experimental)
+│   ├── data/engage_estero/     # posts.csv, pages.csv, events.csv, documents.csv
+│   ├── data/esterotoday_content.csv   # legacy article sync (superseded by posts.csv)
 │   ├── ingest.py / diagnose_retrieval.py  # helpers from React branch (not wired into app.py)
 │   └── tests/
 ├── frontend/                   # Vanilla JS chat + admin.html
@@ -152,11 +155,35 @@ python -m pytest pipeline/tests -q
 
 See [`pipeline/README.md`](pipeline/README.md) for full details.
 
+## Engage Estero website content
+
+Meeting minutes are only part of the corpus. Every other content type published on
+esterotoday.com is synced through a connector registry in `backend/sources/` and
+indexed alongside the gold CSV:
+
+| Source | `source_type` | CSV |
+| --- | --- | --- |
+| News posts | `website_article` | `data/engage_estero/posts.csv` |
+| Site pages | `website_page` | `data/engage_estero/pages.csv` |
+| Events | `event` | `data/engage_estero/events.csv` |
+| PDF documents | `document` | `data/engage_estero/documents.csv` |
+
+```bash
+python backend/scripts/sync_engage_estero.py                      # all sources
+python backend/scripts/sync_engage_estero.py --types posts,events
+python backend/scripts/sync_engage_estero.py --types documents --fetch-pdf-text
+```
+
+Syncs are append-only by `record_id` (URL-aware, so legacy article rows are not
+duplicated). Adding a source means one `SourceSpec` plus one fetch function — see
+[docs/ARCHITECTURE_ALL_SOURCES.md](docs/ARCHITECTURE_ALL_SOURCES.md).
+
 ## CI
 
 - **ci.yml** — ruff + backend router/golden/smoke/admin tests (no Groq key required)
 - **pipeline-ci.yml** — pipeline pytest + deliverables up-to-date guard
 - **pipeline-refresh.yml** — weekly data refresh from source PDFs
+- **sync-engage-estero.yml** — weekly sync of site posts/pages/events/documents
 - **deploy.yml** — Cloud Run deploy when `ENABLE_DEPLOY=true`
 
 ## Production
@@ -166,6 +193,7 @@ Cloud Run serves the vanilla frontend and API from one container (`SERVE_FRONTEN
 ## Notes
 
 - Corpus path: `backend/data/gold/meetings_ai_public.csv` (override with `CSV_PATH`)
-- Index is rebuilt when the CSV changes (hash in `faiss_index/manifest.json`)
+- Index is rebuilt when the gold CSV *or* any `data/engage_estero/*.csv` changes (hashes in `faiss_index/manifest.json`)
+- Disable the extra sources with `ENABLE_SUPPLEMENTAL_SOURCES=false`, or narrow them with `ENABLED_SOURCE_KEYS=posts,events`
 - Optional tracing: `OTEL_ENABLED=true` + `pip install -r requirements-eval.txt`
 - `frontend-react/` Community Pulse widgets (meetings/news/recent decisions) expect companion APIs or static JSON; `/recent-decisions` from the alternate backend rewrite is **not** mounted on the Schema V3 `app.py` yet

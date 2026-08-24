@@ -1,0 +1,57 @@
+name: Sync Engage Estero content
+
+on:
+  schedule:
+    # Friday 19:30 UTC — after pipeline-refresh.yml (18:00) and the legacy
+    # article sync (19:00), so the data-sync workflows don't race pushing to
+    # the same branch.
+    - cron: "30 19 * * 5"
+  workflow_dispatch:
+    inputs:
+      types:
+        description: "Comma-separated sources (posts,pages,events,documents)"
+        required: false
+        default: "posts,pages,events,documents"
+      fetch_pdf_text:
+        description: "Also extract PDF body text (slow)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync all content types and commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install sync dependencies
+        run: pip install requests==2.34.2 pymupdf>=1.28.2
+
+      - name: Sync Engage Estero content
+        run: |
+          ARGS="--types ${{ inputs.types || 'posts,pages,events,documents' }}"
+          if [ "${{ inputs.fetch_pdf_text }}" = "true" ]; then
+            ARGS="$ARGS --fetch-pdf-text"
+          fi
+          python backend/scripts/sync_engage_estero.py $ARGS
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- backend/data/engage_estero; then
+            echo "No new content."
+            exit 0
+          fi
+          git add backend/data/engage_estero
+          git commit -m "chore(data): sync Engage Estero content"
+          git push

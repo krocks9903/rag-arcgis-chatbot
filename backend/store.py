@@ -21,6 +21,7 @@ from config import (
     CHUNK_SUMMARY_MIN,
     DEFAULT_CSV_PATH,
     EMBEDDING_MODEL,
+    ENABLE_SUPPLEMENTAL_SOURCES,
     INDEX_DIR,
     MANIFEST_FILE,
 )
@@ -161,26 +162,53 @@ def _save_manifest(manifest: dict[str, Any]) -> None:
         json.dump(manifest, f, indent=2)
 
 
-def _save_bm25(ids: list[str], corpus: list[str]) -> None:
+def _save_bm25(ids: list[str], corpus: list[str], metas: list[dict[str, Any]]) -> None:
     os.makedirs(INDEX_DIR, exist_ok=True)
     with open(BM25_FILE, "w", encoding="utf-8") as f:
-        json.dump({"ids": ids, "corpus": corpus}, f)
+        json.dump({"ids": ids, "corpus": corpus, "metas": metas}, f)
 
 
-def _load_bm25() -> tuple[list[str], list[str]]:
+def _load_bm25() -> tuple[list[str], list[str], list[dict[str, Any]] | None]:
     with open(BM25_FILE, encoding="utf-8") as f:
         payload = json.load(f)
-    return payload["ids"], payload["corpus"]
+    return payload["ids"], payload["corpus"], payload.get("metas")
+
+
+def _supplemental_documents() -> tuple[list[Document], dict[str, str]]:
+    """Non-meeting Engage Estero content, plus per-source hashes for the manifest.
+
+    Imported lazily so a missing/broken source never blocks the meetings index.
+    """
+    if not ENABLE_SUPPLEMENTAL_SOURCES:
+        return [], {}
+    try:
+        from sources import load_documents, source_hashes
+    except ImportError as exc:
+        print(f"Supplemental sources unavailable ({exc}) — indexing meetings only")
+        return [], {}
+    try:
+        hashes = source_hashes()
+        if not hashes:
+            return [], {}
+        print("Loading supplemental Engage Estero sources…")
+        return load_documents(), hashes
+    except Exception as exc:
+        print(f"Supplemental source load failed ({exc}) — indexing meetings only")
+        return [], {}
 
 
 def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
-    """Build or load hybrid index for *csv_path*."""
+    """Build or load hybrid index for *csv_path* plus supplemental sources."""
     global _store
     digest = csv_hash(csv_path)
+    supplemental_docs, supplemental_hashes = _supplemental_documents()
     manifest = _load_manifest()
     cache_ok = (
         manifest.get("csv_hash") == digest
         and manifest.get("embedding_model") == EMBEDDING_MODEL
+        # Rebuild when any supplemental source changed, otherwise a fresh
+        # content sync would never reach the index.
+        and manifest.get("source_hashes", {}) == supplemental_hashes
         and os.path.exists(INDEX_DIR)
         and os.path.exists(BM25_FILE)
     )
@@ -192,15 +220,17 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
     if cache_ok:
         print(f"Cache hit — loading index for {csv_path}")
         store.vectorstore = FAISS.load_local(INDEX_DIR, emb, allow_dangerous_deserialization=True)
-        ids, corpus = _load_bm25()
+        ids, corpus, metas = _load_bm25()
         store.bm25_ids = ids
         store.bm25 = BM25Okapi([_tokenize(t) for t in corpus])
         store.documents = [
             Document(
                 page_content=text,
-                metadata=_metadata_from_chunk(cid, text),
+                # Caches written before metadata was persisted fall back to
+                # recovering dates from the chunk text.
+                metadata=(metas[i] if metas and i < len(metas) else _metadata_from_chunk(cid, text)),
             )
-            for cid, text in zip(ids, corpus)
+            for i, (cid, text) in enumerate(zip(ids, corpus))
         ]
         store.chunk_count = manifest.get("chunk_count", len(store.documents))
         _store = store
@@ -209,6 +239,9 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
 
     print(f"Building index for {csv_path}…")
     docs = rows_to_chunks(df, summary_min_len=CHUNK_SUMMARY_MIN)
+    if supplemental_docs:
+        print(f"Adding {len(supplemental_docs)} supplemental chunk(s) to the index")
+        docs = docs + supplemental_docs
     store.documents = docs
     store.chunk_count = len(docs)
     store.vectorstore = FAISS.from_documents(docs, emb)
@@ -217,13 +250,14 @@ def build_store(csv_path: str = DEFAULT_CSV_PATH) -> DataStore:
     corpus_texts = [d.page_content for d in docs]
     store.bm25_ids = [d.metadata.get("chunk_id", str(i)) for i, d in enumerate(docs)]
     store.bm25 = BM25Okapi([_tokenize(t) for t in corpus_texts])
-    _save_bm25(store.bm25_ids, corpus_texts)
+    _save_bm25(store.bm25_ids, corpus_texts, [d.metadata for d in docs])
 
     _save_manifest({
         "csv_hash": digest,
         "embedding_model": EMBEDDING_MODEL,
         "chunk_count": store.chunk_count,
         "record_count": store.record_count,
+        "source_hashes": supplemental_hashes,
     })
     _store = store
     print(f"Index built: {store.chunk_count} chunks, {store.record_count} rows")

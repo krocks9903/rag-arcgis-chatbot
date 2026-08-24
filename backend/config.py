@@ -14,6 +14,22 @@ DATA_DIR = os.path.join(BACKEND_DIR, "data")
 GOLD_CSV_PATH = os.path.join(DATA_DIR, "gold", "meetings_ai_public.csv")
 DEFAULT_CSV_PATH = os.getenv("CSV_PATH", GOLD_CSV_PATH)
 
+# Non-meeting Engage Estero content (news posts, pages, events, PDF documents).
+# One CSV per source under this directory; see docs/ARCHITECTURE_ALL_SOURCES.md.
+ENGAGE_ESTERO_DIR = os.getenv("ENGAGE_ESTERO_DIR", os.path.join(DATA_DIR, "engage_estero"))
+# Pre-registry article sync target, still read when posts.csv is absent.
+LEGACY_ARTICLES_CSV = os.path.join(DATA_DIR, "esterotoday_content.csv")
+# Index these sources alongside the gold meetings corpus.
+ENABLE_SUPPLEMENTAL_SOURCES = os.getenv("ENABLE_SUPPLEMENTAL_SOURCES", "true").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+# Comma-separated source keys to index; empty means every registered source.
+ENABLED_SOURCE_KEYS = {
+    k.strip() for k in os.getenv("ENABLED_SOURCE_KEYS", "").split(",") if k.strip()
+}
+
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 # MiniLM cross-encoder is ~5–10× faster on Cloud Run CPU than bge-reranker-base.
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
