@@ -1,4 +1,4 @@
-"""Corrective RAG path: Gemini extracts facts, Groq writes the citizen summary."""
+"""Corrective RAG path: Gemini extracts facts; Haiku (or Groq) writes the summary."""
 from __future__ import annotations
 
 import json
@@ -16,6 +16,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain.schema import Document
 
 from config import (
+    ANTHROPIC_MODEL,
     CRAG_MAX_ITERS,
     ENABLE_LLM_COLLABORATE,
     GEMINI_MODEL,
@@ -38,8 +39,10 @@ from store import DataStore
 
 logger = logging.getLogger(__name__)
 
-Provider = Literal["gemini", "groq"]
+Provider = Literal["gemini", "groq", "anthropic"]
+SummaryProvider = Literal["anthropic", "groq"]
 _llms: dict[str, Any] = {}
+_anthropic_client: Any = None
 
 
 def _prompt(name: str) -> str:
@@ -62,8 +65,48 @@ def groq_available() -> bool:
     return bool(os.getenv("GROQ_API_KEY"))
 
 
+def anthropic_available() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY"))
+
+
+def summary_backend_available() -> bool:
+    return anthropic_available() or groq_available()
+
+
+def choose_summary_provider() -> SummaryProvider:
+    """Prefer Claude Haiku for the resident summary; Groq is the fallback."""
+    if anthropic_available():
+        return "anthropic"
+    if groq_available():
+        return "groq"
+    raise RuntimeError("No summary LLM key set (need ANTHROPIC_API_KEY or GROQ_API_KEY)")
+
+
+def summary_model_name(provider: SummaryProvider | None = None) -> str:
+    provider = provider or choose_summary_provider()
+    return ANTHROPIC_MODEL if provider == "anthropic" else GROQ_MODEL
+
+
+def get_anthropic_client():
+    """Lazy Anthropic client (Haiku) — avoids import-time hard fail when key unset."""
+    global _anthropic_client
+    if not anthropic_available():
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+    if _anthropic_client is None:
+        import anthropic
+
+        _anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        logger.info("Initialized Anthropic LLM model=%s", ANTHROPIC_MODEL)
+    return _anthropic_client
+
+
 def get_llm(provider: Provider):
-    """Return a cached chat model for gemini or groq."""
+    """Return a cached chat model for gemini or groq (LangChain)."""
+    if provider == "anthropic":
+        # Anthropic is used via the SDK for summary streaming; warmup just
+        # constructs the client.
+        return get_anthropic_client()
+
     if provider == "gemini":
         if not gemini_available():
             raise RuntimeError("GEMINI_API_KEY is not set")
@@ -90,7 +133,7 @@ def get_llm(provider: Provider):
             model=GROQ_MODEL,
             groq_api_key=os.environ["GROQ_API_KEY"],
             temperature=0.0,
-            max_tokens=900,
+            max_tokens=450,
             timeout=90,
             max_retries=1,
         )
@@ -101,10 +144,12 @@ def get_llm(provider: Provider):
 # Back-compat for warmup / older callers that used tier names.
 def choose_llm_tier(question: str, crag_meta: dict[str, Any] | None = None) -> str:
     _ = question, crag_meta
-    if gemini_available() and groq_available() and ENABLE_LLM_COLLABORATE:
+    if gemini_available() and summary_backend_available() and ENABLE_LLM_COLLABORATE:
         return "collaborate"
     if gemini_available():
         return "gemini"
+    if anthropic_available():
+        return "anthropic"
     return "groq"
 
 
@@ -166,8 +211,9 @@ def format_summary_bullets(text: str) -> str:
 
     if not bullets:
         return empty
-    # Keep the answer scannable
-    return "\n".join(bullets[:6])
+    # Keep the answer scannable (concise pack asks for 2–3; never dump a wall of text)
+    limit = 3 if (_variant_name() or "").lower() == "concise" else 5
+    return "\n".join(bullets[:limit])
 
 
 def parse_structured_answer(raw: str, route: str = RouteKind.RAG.value) -> ChatResponse:
@@ -180,7 +226,7 @@ def parse_structured_answer(raw: str, route: str = RouteKind.RAG.value) -> ChatR
         summary = format_summary_bullets(str(payload.get("summary", "")).strip())
         if not summary and not projects:
             summary = "I don't have records on that."
-        result = ChatResponse(summary=summary, projects=projects[:5], answer=summary, route=route)
+        result = ChatResponse(summary=summary, projects=projects[:3], answer=summary, route=route)
         result.meta["parse_ok"] = True
         return result
     except Exception:
@@ -195,7 +241,7 @@ def parse_projects_only(raw: str) -> list[ProjectOut]:
         projects = [ProjectOut.model_validate(p) for p in payload.get("projects", [])]
         for p in projects:
             p.summary = finalize_prose(p.summary)
-        return projects[:5]
+        return projects[:3]
     except Exception:
         logger.warning("Gemini extract JSON parse failed")
         return []
@@ -429,25 +475,60 @@ def gemini_extract_projects(question: str, context: str) -> list[ProjectOut]:
     return refine_projects_for_question(question, parse_projects_only(raw))
 
 
+def _summary_prompt_text(question: str, projects: list[ProjectOut]) -> str:
+    projects_json = json.dumps([p.model_dump() for p in projects[:3]], ensure_ascii=False)
+    return _prompt("summary").format(question=question, projects_json=projects_json)
+
+
+def _fallback_summary_from_projects(projects: list[ProjectOut]) -> str:
+    if projects:
+        titles = [p.title for p in projects[:3] if p.title]
+        bullets = [f"- Related record: {t}." for t in titles] or [
+            f"- Records show {len(projects)} related item{'s' if len(projects) != 1 else ''}."
+        ]
+        return "\n".join(bullets)
+    return "I don't have records on that."
+
+
+def _haiku_write_summary(question: str, projects: list[ProjectOut]) -> str:
+    client = get_anthropic_client()
+    user = _summary_prompt_text(question, projects)
+    response = client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=450,
+        temperature=0,
+        messages=[{"role": "user", "content": user}],
+    )
+    text = "".join(b.text for b in response.content if getattr(b, "type", None) == "text")
+    text = format_summary_bullets(text)
+    return text or _fallback_summary_from_projects(projects)
+
+
+def _stream_haiku_summary(question: str, projects: list[ProjectOut]) -> Iterator[str]:
+    client = get_anthropic_client()
+    user = _summary_prompt_text(question, projects)
+    with client.messages.stream(
+        model=ANTHROPIC_MODEL,
+        max_tokens=450,
+        temperature=0,
+        messages=[{"role": "user", "content": user}],
+    ) as stream:
+        for chunk in stream.text_stream:
+            if chunk:
+                yield chunk
+
+
 def groq_write_summary(question: str, projects: list[ProjectOut]) -> str:
-    projects_json = json.dumps([p.model_dump() for p in projects[:5]], ensure_ascii=False)
+    projects_json = json.dumps([p.model_dump() for p in projects[:3]], ensure_ascii=False)
     prompt = PromptTemplate(template=_prompt("summary"), input_variables=["question", "projects_json"])
     chain = prompt | get_llm("groq") | StrOutputParser()
     text = chain.invoke({"question": question, "projects_json": projects_json})
     text = format_summary_bullets(text)
-    if not text:
-        if projects:
-            titles = [p.title for p in projects[:3] if p.title]
-            bullets = [f"- Related record: {t}." for t in titles] or [
-                f"- Records show {len(projects)} related item{'s' if len(projects) != 1 else ''}."
-            ]
-            return "\n".join(bullets)
-        return "I don't have records on that."
-    return text
+    return text or _fallback_summary_from_projects(projects)
 
 
 def stream_groq_summary(question: str, projects: list[ProjectOut]) -> Iterator[str]:
-    projects_json = json.dumps([p.model_dump() for p in projects[:5]], ensure_ascii=False)
+    projects_json = json.dumps([p.model_dump() for p in projects[:3]], ensure_ascii=False)
     prompt = PromptTemplate(template=_prompt("summary"), input_variables=["question", "projects_json"])
     chain = prompt | get_llm("groq") | StrOutputParser()
     for chunk in chain.stream({"question": question, "projects_json": projects_json}):
@@ -455,19 +536,48 @@ def stream_groq_summary(question: str, projects: list[ProjectOut]) -> Iterator[s
             yield chunk
 
 
+def write_summary(question: str, projects: list[ProjectOut]) -> str:
+    """Citizen summary via Haiku when available, otherwise Groq."""
+    provider = choose_summary_provider()
+    if provider == "anthropic":
+        try:
+            return _haiku_write_summary(question, projects)
+        except Exception as e:
+            logger.warning("Haiku summary failed (%s); falling back to Groq", e)
+            if not groq_available():
+                raise
+    return groq_write_summary(question, projects)
+
+
+def stream_summary(question: str, projects: list[ProjectOut]) -> Iterator[str]:
+    """Stream citizen summary tokens (Haiku preferred, Groq fallback)."""
+    provider = choose_summary_provider()
+    if provider == "anthropic":
+        try:
+            yield from _stream_haiku_summary(question, projects)
+            return
+        except Exception as e:
+            logger.warning("Haiku stream failed (%s); falling back to Groq", e)
+            if not groq_available():
+                raise
+    yield from stream_groq_summary(question, projects)
+
+
 def generate_collaborative(
     question: str,
     context: str,
     route: str = RouteKind.RAG.value,
 ) -> ChatResponse:
-    """Gemini extracts projects; Groq writes the closing summary."""
+    """Gemini extracts projects; Haiku (or Groq) writes the closing summary."""
     t_extract = time.perf_counter()
     projects = gemini_extract_projects(question, context)
     extract_ms = round((time.perf_counter() - t_extract) * 1000)
 
+    summary_provider = choose_summary_provider()
     t_summary = time.perf_counter()
-    summary = groq_write_summary(question, projects)
+    summary = write_summary(question, projects)
     summary_ms = round((time.perf_counter() - t_summary) * 1000)
+    projects = projects[:3]
 
     result = ChatResponse(
         summary=summary,
@@ -477,17 +587,21 @@ def generate_collaborative(
         meta={
             "parse_ok": True,
             "llm_mode": "collaborate",
-            "llm_providers": ["gemini", "groq"],
-            "llm_models": {"extract": GEMINI_MODEL, "summary": GROQ_MODEL},
+            "llm_providers": ["gemini", summary_provider],
+            "llm_models": {
+                "extract": GEMINI_MODEL,
+                "summary": summary_model_name(summary_provider),
+            },
             "prompt_variant": _variant_name(),
             "extract_ms": extract_ms,
             "summary_ms": summary_ms,
         },
     )
     logger.info(
-        "collaborate extract_ms=%s summary_ms=%s projects=%s",
+        "collaborate extract_ms=%s summary_ms=%s summary_provider=%s projects=%s",
         extract_ms,
         summary_ms,
+        summary_provider,
         len(projects),
     )
     return result
@@ -500,7 +614,7 @@ def generate_answer(
     crag_meta: dict[str, Any] | None = None,
 ) -> ChatResponse:
     _ = crag_meta
-    both = gemini_available() and groq_available() and ENABLE_LLM_COLLABORATE
+    both = gemini_available() and summary_backend_available() and ENABLE_LLM_COLLABORATE
     if both:
         try:
             return generate_collaborative(question, context, route=route)
@@ -521,7 +635,9 @@ def generate_answer(
     if groq_available():
         return _invoke_solo(question, context, "groq", route)
 
-    raise RuntimeError("No LLM API key set (need GEMINI_API_KEY and/or GROQ_API_KEY)")
+    raise RuntimeError(
+        "No LLM API key set (need GEMINI_API_KEY plus ANTHROPIC_API_KEY and/or GROQ_API_KEY)"
+    )
 
 
 def answer_rag(store: DataStore, question: str) -> ChatResponse:

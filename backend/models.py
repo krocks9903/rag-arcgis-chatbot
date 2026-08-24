@@ -12,6 +12,7 @@ class RouteKind(str, Enum):
     KEYWORD = "keyword"
     RAG = "rag"
     MIXED = "mixed"
+    EVENTS = "events"
 
 
 class ProjectOut(BaseModel):

@@ -3,7 +3,11 @@ import { useEvents } from "../../hooks/useEvents";
 import { useMeetings } from "../../hooks/useMeetings";
 import { SkeletonRows } from "./Skeleton";
 import MiniCalendar from "./MiniCalendar";
-import type { CalendarEvent, DayEvent, Meeting } from "../../types";
+import type { CalendarEvent, DayEvent, EventCategory, Meeting } from "../../types";
+import {
+  EVENT_CHIP_LABELS,
+  normalizeEventCategory,
+} from "../../types";
 import { meetingSourceUrl } from "../../lib/meetingSource";
 
 function formatDateBadge(dateKey: string): { month: string; day: number } {
@@ -35,15 +39,15 @@ function meetingTimeToSortable(time: string): string {
 
 function eventToDayEvent(ev: CalendarEvent): DayEvent {
   return {
-    source: "esterotoday",
-    id: `esterotoday-${ev.id}`,
+    source: ev.source || "esterotoday",
+    id: `feed-${ev.id}`,
     dateKey: ev.start.slice(0, 10),
     sortKey: ev.start,
     title: ev.title,
     time: formatEventTime(ev),
     venue: ev.venue,
     url: ev.url,
-    category: ev.category,
+    category: normalizeEventCategory(ev.category),
   };
 }
 
@@ -57,16 +61,11 @@ function meetingToDayEvent(m: Meeting): DayEvent {
     time: m.time,
     venue: m.venue,
     url: meetingSourceUrl(m),
-    category: "village",
+    category: "government",
   };
 }
 
-/** Merges EsteroToday's Events Calendar feed (/api/events) with the
- * hand-maintained Village Council / PZDB schedule (public/meetings.json,
- * same source NextMeetings reads) into one per-day view. The calendar must
- * never show a dot NextMeetings doesn't agree with, or vice versa — see the
- * investigation note in this branch's summary for why these are two
- * genuinely independent sources with no shared id to dedupe against. */
+/** Merges /api/events (EsteroToday + FGCU + manual) with meetings.json. */
 function buildDayEvents(events: CalendarEvent[], meetings: Meeting[]): Map<string, DayEvent[]> {
   const map = new Map<string, DayEvent[]>();
   const push = (entry: DayEvent) => {
@@ -82,23 +81,48 @@ function buildDayEvents(events: CalendarEvent[], meetings: Meeting[]): Map<strin
   return map;
 }
 
-const NEXT_N = 5;
+const NEXT_N = 25;
+
+const FILTER_CHIPS: Array<"all" | EventCategory> = [
+  "all",
+  "government",
+  "music",
+  "market",
+  "sports",
+  "fair",
+  "community",
+  "other",
+];
 
 export default function UpcomingEvents() {
   const { events, loading, error, retry } = useEvents();
-  // Infinity, not the 3-item limit NextMeetings uses — the calendar needs
-  // every meeting in view, not just the next few, so it can be navigated to
-  // any month without silently dropping dots.
   const { meetings } = useMeetings(Infinity);
 
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<"all" | EventCategory>("all");
 
   const dayEvents = useMemo(() => buildDayEvents(events, meetings), [events, meetings]);
-  const defaultList = useMemo(() => events.slice(0, NEXT_N).map(eventToDayEvent), [events]);
-  const filteredList = selectedDateKey ? dayEvents.get(selectedDateKey) || [] : null;
+
+  const filteredEvents = useMemo(() => {
+    if (categoryFilter === "all") return events;
+    return events.filter((ev) => normalizeEventCategory(ev.category) === categoryFilter);
+  }, [events, categoryFilter]);
+
+  const defaultList = useMemo(
+    () => filteredEvents.slice(0, NEXT_N).map(eventToDayEvent),
+    [filteredEvents],
+  );
+
+  const filteredList = useMemo(() => {
+    if (!selectedDateKey) return null;
+    const day = dayEvents.get(selectedDateKey) || [];
+    if (categoryFilter === "all") return day;
+    return day.filter((item) => normalizeEventCategory(item.category) === categoryFilter);
+  }, [selectedDateKey, dayEvents, categoryFilter]);
+
   const displayList = filteredList ?? defaultList;
 
   const handleSelectDate = (dateKey: string) => {
@@ -128,6 +152,24 @@ export default function UpcomingEvents() {
 
       {!loading && !error && (
         <>
+          <div className="events-category-chips" role="toolbar" aria-label="Filter events by type">
+            {FILTER_CHIPS.map((chip) => {
+              const label = chip === "all" ? "All" : EVENT_CHIP_LABELS[chip] || chip;
+              const active = categoryFilter === chip;
+              return (
+                <button
+                  key={chip}
+                  type="button"
+                  className={`events-cat-chip${active ? " events-cat-chip-active" : ""}`}
+                  aria-pressed={active}
+                  onClick={() => setCategoryFilter(chip)}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
           <MiniCalendar
             dayEvents={dayEvents}
             viewYear={viewYear}
@@ -151,7 +193,7 @@ export default function UpcomingEvents() {
 
           {displayList.length === 0 ? (
             <p className="pulse-empty">
-              {selectedDateKey ? "No events that day." : "No upcoming events."}{" "}
+              {selectedDateKey ? "No events that day." : "No upcoming events in this filter."}{" "}
               <a href="https://esterotoday.com/events/" target="_blank" rel="noopener noreferrer">
                 See the full calendar ↗
               </a>
@@ -160,6 +202,7 @@ export default function UpcomingEvents() {
             <ul className="events-list">
               {displayList.map((item) => {
                 const { month, day } = formatDateBadge(item.dateKey);
+                const cat = normalizeEventCategory(item.category);
                 return (
                   <li key={item.id} className="event-row">
                     <div className="date-leaf">
@@ -175,10 +218,8 @@ export default function UpcomingEvents() {
                         ) : (
                           <span className="event-title event-title-plain">{item.title}</span>
                         )}
-                        <span
-                          className={`event-pill event-pill-${item.category === "village" ? "village" : "engage"}`}
-                        >
-                          {item.category === "village" ? "Village" : "Engage Estero"}
+                        <span className={`event-pill event-pill-${cat}`}>
+                          {EVENT_CHIP_LABELS[cat] || cat}
                         </span>
                       </div>
                       <div className="event-meta">

@@ -1220,16 +1220,40 @@ a.meeting-row-link:hover .meeting-name {
   color: var(--navy);
   font-weight: 700;
 }
+.mini-cal-day-circle-government,
 .mini-cal-day-circle-village {
   background: #14264c;
   color: #fff;
   font-weight: 700;
 }
+.mini-cal-day-circle-community,
 .mini-cal-day-circle-engage {
   background: #c9a227;
   color: #fff;
   font-weight: 700;
 }
+.mini-cal-day-circle-sports {
+  background: #2f6b4f;
+  color: #fff;
+  font-weight: 700;
+}
+.mini-cal-day-circle-music {
+  background: #3d7a66;
+  color: #fff;
+  font-weight: 700;
+}
+.mini-cal-day-circle-market,
+.mini-cal-day-circle-fair {
+  background: #8a6d10;
+  color: #fff;
+  font-weight: 700;
+}
+.mini-cal-day-circle-other {
+  background: #6b7280;
+  color: #fff;
+  font-weight: 700;
+}
+.mini-cal-day-circle-mixed,
 .mini-cal-day-circle-split {
   background: linear-gradient(90deg, #14264c 50%, #c9a227 50%);
   color: #fff;
@@ -1299,14 +1323,52 @@ a.meeting-row-link:hover .meeting-name {
   border-radius: 50%;
   flex-shrink: 0;
 }
+.mini-cal-legend-swatch-government,
 .mini-cal-legend-swatch-village {
   background: #14264c;
 }
+.mini-cal-legend-swatch-community,
 .mini-cal-legend-swatch-engage {
   background: #c9a227;
 }
+.mini-cal-legend-swatch-sports {
+  background: #2f6b4f;
+}
+.mini-cal-legend-swatch-music {
+  background: #3d7a66;
+}
+.mini-cal-legend-swatch-market {
+  background: #8a6d10;
+}
 
 /* Upcoming Events — filter chip + next-N / filtered list */
+.events-category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.events-cat-chip {
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--text-muted);
+  border-radius: 99px;
+  padding: 3px 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.events-cat-chip:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+}
+.events-cat-chip-active {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
 .events-filter-chip {
   background: var(--gold-light);
   border: 1px solid rgba(201, 151, 58, 0.3);
@@ -1381,15 +1443,38 @@ a.meeting-row-link:hover .meeting-name {
   padding: 2px 7px;
   flex-shrink: 0;
 }
+.event-pill-government,
 .event-pill-village {
   background: rgba(20, 38, 76, 0.1);
   color: #14264c;
   border: 1px solid rgba(20, 38, 76, 0.3);
 }
+.event-pill-community,
 .event-pill-engage {
   background: rgba(201, 162, 39, 0.14);
   color: #8a6d10;
   border: 1px solid rgba(201, 162, 39, 0.35);
+}
+.event-pill-sports {
+  background: rgba(47, 107, 79, 0.12);
+  color: #2f6b4f;
+  border: 1px solid rgba(47, 107, 79, 0.35);
+}
+.event-pill-music {
+  background: rgba(61, 122, 102, 0.12);
+  color: #2f5f50;
+  border: 1px solid rgba(61, 122, 102, 0.35);
+}
+.event-pill-market,
+.event-pill-fair {
+  background: rgba(138, 109, 16, 0.12);
+  color: #8a6d10;
+  border: 1px solid rgba(138, 109, 16, 0.35);
+}
+.event-pill-other {
+  background: rgba(107, 114, 128, 0.12);
+  color: #4b5563;
+  border: 1px solid rgba(107, 114, 128, 0.3);
 }
 
 /* Recent Board Decisions */

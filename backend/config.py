@@ -17,8 +17,10 @@ DEFAULT_CSV_PATH = os.getenv("CSV_PATH", GOLD_CSV_PATH)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 # MiniLM cross-encoder is ~5–10× faster on Cloud Run CPU than bge-reranker-base.
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-# Primary: Gemini extracts project facts. Groq writes the citizen summary (collaborate).
+# Collaborate: Gemini extracts project facts; Haiku writes the citizen summary
+# (Groq is the summary fallback when ANTHROPIC_API_KEY is unset).
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 ENABLE_LLM_COLLABORATE = os.getenv("ENABLE_LLM_COLLABORATE", "true").lower() not in {"0", "false", "no"}
 # Skip LLM when keyword lookup returns a tight hit (app ID or ≤ N rows).
@@ -56,7 +58,8 @@ PROJECT_SCOPE_CAP = int(os.getenv("PROJECT_SCOPE_CAP", "20"))
 # Warn users when an answer cites meeting records older than this many years.
 STALE_SOURCE_YEARS = float(os.getenv("STALE_SOURCE_YEARS", "5"))
 # Prompt pack under backend/prompts/<variant>/ (default | concise).
-PROMPT_VARIANT = os.getenv("PROMPT_VARIANT", "default").strip() or "default"
+# concise = shorter resident answers (2–3 bullets, ≤3 project cards).
+PROMPT_VARIANT = os.getenv("PROMPT_VARIANT", "concise").strip() or "concise"
 
 FEEDBACK_DIR = os.path.join(DATA_DIR, "feedback")
 FEEDBACK_FILE = os.path.join(FEEDBACK_DIR, "feedback.jsonl")

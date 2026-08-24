@@ -62,12 +62,20 @@ def test_parse_structured_answer_strips_markdown_fence():
 
 
 def test_choose_llm_tier_collaborate_when_both_keys(monkeypatch):
-    from rag_path import choose_llm_tier
+    from rag_path import choose_llm_tier, choose_summary_provider
 
     monkeypatch.setenv("GEMINI_API_KEY", "g")
     monkeypatch.setenv("GROQ_API_KEY", "q")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert choose_llm_tier("Explain RiverCreek") == "collaborate"
+    assert choose_summary_provider() == "groq"
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    assert choose_llm_tier("Explain RiverCreek") == "collaborate"
+    assert choose_summary_provider() == "anthropic"
+
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert choose_llm_tier("Corkscrew Road") == "gemini"
 
 

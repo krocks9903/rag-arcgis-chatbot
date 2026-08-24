@@ -81,10 +81,22 @@ export interface RecentDecision {
 }
 
 // Named CalendarEvent (not Event) to avoid shadowing the DOM's global Event type.
-export type EventCategory = "engage-estero" | "village";
+export type EventCategory =
+  | "government"
+  | "music"
+  | "market"
+  | "sports"
+  | "fair"
+  | "community"
+  | "other"
+  /** @deprecated kept for older cached payloads */
+  | "engage-estero"
+  | "village";
+
+export type EventSource = "esterotoday" | "meeting" | "venue" | "manual" | "lee_county";
 
 export interface CalendarEvent {
-  id: number;
+  id: number | string;
   title: string;
   start: string; // local wall-clock datetime, e.g. "2026-08-18T16:30:00" (no offset)
   end: string;
@@ -92,21 +104,55 @@ export interface CalendarEvent {
   venue: string | null;
   url: string;
   category: EventCategory;
+  source?: EventSource;
+  location?: string;
 }
 
-/** Unified view of a single day's activity, merging /api/events (EsteroToday's
- * Events Calendar feed) with public/meetings.json (the hand-maintained Village
+/** Unified view of a single day's activity, merging /api/events (community
+ * calendar feeds) with public/meetings.json (the hand-maintained Village
  * Council / PZDB schedule NextMeetings reads) — the mini calendar in
  * UpcomingEvents renders dots/circles and the hover/click list from this, not
  * from either source alone, so it never disagrees with Next Meetings. */
 export interface DayEvent {
-  source: "esterotoday" | "meeting";
+  source: EventSource;
   id: string; // unique across both sources
   dateKey: string; // YYYY-MM-DD
   sortKey: string; // chronologically sortable string, for ordering same-day items
   title: string;
   time: string; // display string, e.g. "4:30 PM" or "All day"
   venue: string | null;
-  url: string | null; // EsteroToday event page, or Village minutes index for meetings
+  url: string | null; // event page, or Village minutes index for meetings
   category: EventCategory;
+}
+
+export const EVENT_CHIP_ORDER: EventCategory[] = [
+  "government",
+  "music",
+  "market",
+  "sports",
+  "fair",
+  "community",
+  "other",
+];
+
+export const EVENT_CHIP_LABELS: Record<string, string> = {
+  government: "Government",
+  music: "Music",
+  market: "Markets",
+  sports: "Sports",
+  fair: "Fairs",
+  community: "Community",
+  other: "Other",
+  village: "Government",
+  "engage-estero": "Community",
+};
+
+/** Normalize legacy village/engage-estero categories from older API payloads. */
+export function normalizeEventCategory(category: string | undefined | null): EventCategory {
+  if (category === "village") return "government";
+  if (category === "engage-estero") return "community";
+  if (category && EVENT_CHIP_ORDER.includes(category as EventCategory)) {
+    return category as EventCategory;
+  }
+  return "other";
 }

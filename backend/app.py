@@ -52,7 +52,7 @@ _SAFE_CSV_NAME = re.compile(r"^[\w.\- ]+\.csv$", re.IGNORECASE)
 
 def _warm_models() -> dict[str, bool]:
     """Load reranker + LLMs and run one retrieve so the first user question is warm."""
-    from rag_path import gemini_available, get_llm, groq_available
+    from rag_path import anthropic_available, gemini_available, get_llm, groq_available
     from retrieval import get_reranker, hybrid_retrieve
 
     store = get_store()
@@ -60,6 +60,7 @@ def _warm_models() -> dict[str, bool]:
     reranker_ok = False
     llm_gemini_ok = False
     llm_groq_ok = False
+    llm_anthropic_ok = False
     retrieve_ok = False
     if ready:
         get_reranker()
@@ -72,6 +73,12 @@ def _warm_models() -> dict[str, bool]:
                 llm_gemini_ok = True
             except Exception as e:
                 logger.warning("Gemini warmup skipped: %s", e)
+        if anthropic_available():
+            try:
+                get_llm("anthropic")
+                llm_anthropic_ok = True
+            except Exception as e:
+                logger.warning("Anthropic warmup skipped: %s", e)
         if groq_available():
             try:
                 get_llm("groq")
@@ -81,8 +88,9 @@ def _warm_models() -> dict[str, bool]:
     return {
         "chain_ready": ready,
         "reranker": reranker_ok,
-        "llm": llm_gemini_ok or llm_groq_ok,
+        "llm": llm_gemini_ok or llm_groq_ok or llm_anthropic_ok,
         "llm_gemini": llm_gemini_ok,
+        "llm_anthropic": llm_anthropic_ok,
         "llm_groq": llm_groq_ok,
         "retrieve": retrieve_ok,
     }

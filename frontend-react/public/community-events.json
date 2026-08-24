@@ -1,0 +1,4 @@
+{
+  "_comment": "MANUALLY MAINTAINED community events (flea markets, fairs, one-offs) with no stable API. Same maintenance idea as meetings.json — drop past dates, add upcoming ones. Categories: government | music | market | sports | fair | community | other. Merged into GET /api/events by backend/events_sources/manual.py. Example entry shape: { id, title, start, end, allDay, venue, url, category, location }.",
+  "events": []
+}

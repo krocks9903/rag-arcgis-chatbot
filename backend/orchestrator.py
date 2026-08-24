@@ -9,21 +9,24 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from config import ENABLE_LLM_COLLABORATE, GEMINI_MODEL, GROQ_MODEL
+from config import ENABLE_LLM_COLLABORATE, GEMINI_MODEL
+from events_path import answer_upcoming_events, is_events_question
 from keyword_path import answer_keyword, is_strong_keyword_hit
 from models import ChatResponse, RouteKind
 from rag_path import (
     answer_rag,
     choose_llm_tier,
+    choose_summary_provider,
     finalize_prose,
     format_summary_bullets,
     gemini_available,
     gemini_extract_projects,
     generate_answer,
-    groq_available,
-    groq_write_summary,
+    summary_backend_available,
+    summary_model_name,
+    stream_summary,
+    write_summary,
     retrieve_with_crag,
-    stream_groq_summary,
 )
 from router import route_question
 from stale_sources import attach_stale_source_notice
@@ -61,8 +64,20 @@ def answer_question(question: str) -> ChatResponse:
     if store is None or not store.is_ready():
         raise HTTPException(503, "No dataset loaded. Use Load CSV in the UI first.")
 
-    route = route_question(question)
     t0 = time.perf_counter()
+    if is_events_question(question):
+        result = answer_upcoming_events(question)
+        result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+        attach_coords(result.projects, store.dataframe)
+        logger.info(
+            "answer_question route=%s mode=%s total_ms=%s",
+            result.route,
+            result.meta.get("paths"),
+            result.meta["latency_ms"],
+        )
+        return result
+
+    route = route_question(question)
     with trace_span("answer_question", {"route": route.value, "question": question[:120]}):
         if route == RouteKind.STRUCTURED:
             result = answer_structured(store.dataframe, question)
@@ -97,8 +112,17 @@ def stream_answer(question: str) -> Iterator[str]:
         yield _sse({"type": "error", "detail": "No dataset loaded"})
         return
 
-    route = route_question(question)
     t0 = time.perf_counter()
+    if is_events_question(question):
+        result = answer_upcoming_events(question)
+        result.meta["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+        yield _sse({"type": "meta", "route": RouteKind.EVENTS.value})
+        if result.summary:
+            yield _sse({"type": "token", "text": result.summary})
+        yield _sse({"type": "done", **result.model_dump()})
+        return
+
+    route = route_question(question)
     yield _sse({"type": "meta", "route": route.value})
 
     if route == RouteKind.STRUCTURED:
@@ -124,7 +148,7 @@ def stream_answer(question: str) -> Iterator[str]:
 
     use_collab = (
         gemini_available()
-        and groq_available()
+        and summary_backend_available()
         and ENABLE_LLM_COLLABORATE
     )
     mode = choose_llm_tier(question, crag_meta)
@@ -145,16 +169,23 @@ def stream_answer(question: str) -> Iterator[str]:
             projects = gemini_extract_projects(question, context)
             extract_ms = round((time.perf_counter() - t_ex) * 1000)
 
-            yield _sse({"type": "meta", "phase": "summary", "provider": "groq", "model": GROQ_MODEL})
+            summary_provider = choose_summary_provider()
+            summary_model = summary_model_name(summary_provider)
+            yield _sse({
+                "type": "meta",
+                "phase": "summary",
+                "provider": summary_provider,
+                "model": summary_model,
+            })
             buffer = ""
             t_sum = time.perf_counter()
-            for token in stream_groq_summary(question, projects):
+            for token in stream_summary(question, projects):
                 if first_token_ms is None:
                     first_token_ms = round((time.perf_counter() - t0) * 1000)
                 buffer += token
                 yield _sse({"type": "token", "text": token})
-            summary = format_summary_bullets(buffer) or groq_write_summary(question, projects)
-            projects = projects[:5]
+            summary = format_summary_bullets(buffer) or write_summary(question, projects)
+            projects = projects[:3]
             for p in projects:
                 p.summary = finalize_prose(p.summary)
             summary_ms = round((time.perf_counter() - t_sum) * 1000)
@@ -168,8 +199,8 @@ def stream_answer(question: str) -> Iterator[str]:
                     **crag_meta,
                     "parse_ok": True,
                     "llm_mode": "collaborate",
-                    "llm_providers": ["gemini", "groq"],
-                    "llm_models": {"extract": GEMINI_MODEL, "summary": GROQ_MODEL},
+                    "llm_providers": ["gemini", summary_provider],
+                    "llm_models": {"extract": GEMINI_MODEL, "summary": summary_model},
                     "extract_ms": extract_ms,
                     "summary_ms": summary_ms,
                     "generate_ms": round((time.perf_counter() - t_gen) * 1000),

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import type { DayEvent } from "../../types";
+import type { DayEvent, EventCategory } from "../../types";
+import { normalizeEventCategory } from "../../types";
 
 interface MiniCalendarProps {
   dayEvents: Map<string, DayEvent[]>;
@@ -24,10 +25,24 @@ const MONTH_LABELS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-/** Builds a YYYY-MM-DD key from a (possibly out-of-range) month/day pair by
- * letting the Date constructor normalize month overflow/underflow (e.g.
- * month=-1 rolls back into December of the previous year), then reading the
- * normalized fields back out — avoids hand-rolling year-rollover math. */
+const CIRCLE_PRIORITY: EventCategory[] = [
+  "government",
+  "sports",
+  "music",
+  "market",
+  "fair",
+  "community",
+  "other",
+];
+
+function primaryCategory(events: DayEvent[]): EventCategory | null {
+  const cats = new Set(events.map((e) => normalizeEventCategory(e.category)));
+  for (const cat of CIRCLE_PRIORITY) {
+    if (cats.has(cat)) return cat;
+  }
+  return null;
+}
+
 function toDateKey(year: number, month: number, day: number): string {
   const d = new Date(year, month, day);
   const y = d.getFullYear();
@@ -69,11 +84,6 @@ function buildGrid(year: number, month: number, dayEvents: Map<string, DayEvent[
   return cells;
 }
 
-/** Grid is always 7 columns, row-major, and the first cell in the array is
- * always the Sunday column — so index % 7 gives the column (0=Sun..6=Sat)
- * for any cell without extra date math. Used to keep the hover tooltip from
- * overflowing the panel: edge columns anchor the tooltip to that edge
- * instead of centering it. */
 function tooltipAlignForColumn(index: number): "left" | "center" | "right" {
   const col = index % 7;
   if (col <= 1) return "left";
@@ -123,11 +133,12 @@ export default function MiniCalendar({
         ))}
 
         {cells.map((cell, index) => {
-          const hasVillage = cell.events.some((e) => e.category === "village");
-          const hasEngage = cell.events.some((e) => e.category === "engage-estero");
           const hasEvents = cell.events.length > 0;
           const isSelected = cell.dateKey === selectedDateKey;
           const isHovered = cell.dateKey === hoveredDateKey;
+          const primary = primaryCategory(cell.events);
+          const distinct = new Set(cell.events.map((e) => normalizeEventCategory(e.category)));
+          const isMixed = distinct.size > 1;
 
           const dayClasses = [
             "mini-cal-day",
@@ -141,9 +152,8 @@ export default function MiniCalendar({
           const circleClasses = [
             "mini-cal-day-circle",
             cell.isToday && "mini-cal-day-circle-today",
-            !cell.isToday && hasVillage && hasEngage && "mini-cal-day-circle-split",
-            !cell.isToday && hasVillage && !hasEngage && "mini-cal-day-circle-village",
-            !cell.isToday && hasEngage && !hasVillage && "mini-cal-day-circle-engage",
+            !cell.isToday && isMixed && "mini-cal-day-circle-mixed",
+            !cell.isToday && !isMixed && primary && `mini-cal-day-circle-${primary}`,
           ]
             .filter(Boolean)
             .join(" ");
@@ -191,12 +201,24 @@ export default function MiniCalendar({
 
       <div className="mini-cal-legend">
         <span className="mini-cal-legend-item">
-          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-village" />
-          Village of Estero
+          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-government" />
+          Government
         </span>
         <span className="mini-cal-legend-item">
-          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-engage" />
-          Engage Estero
+          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-community" />
+          Community
+        </span>
+        <span className="mini-cal-legend-item">
+          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-sports" />
+          Sports
+        </span>
+        <span className="mini-cal-legend-item">
+          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-music" />
+          Music
+        </span>
+        <span className="mini-cal-legend-item">
+          <span className="mini-cal-legend-swatch mini-cal-legend-swatch-market" />
+          Markets / Fairs
         </span>
       </div>
     </div>

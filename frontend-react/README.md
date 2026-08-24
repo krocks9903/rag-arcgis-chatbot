@@ -76,17 +76,18 @@ mounted at all times — switching to Pulse just hides it with `display:none` ra
 unmounting, since re-creating the ArcGIS `MapView` is expensive and would lose pan/zoom state.
 
 Three widgets on the Pulse tab:
-- **Next Meetings** — reads `public/meetings.json`, a **manually maintained** file (no calendar
-  API integration exists yet — that's a roadmap item). Update it monthly: drop past dates, add
-  the next occurrence(s), and double check against https://estero-fl.gov/agendas-minutes/ since
-  holidays/rescheduling happen. The regular cadence is documented in the file's `_comment` field.
-- **Latest from EsteroToday** — fetches the 5 newest posts directly from EsteroToday's public
-  WordPress REST API (`useNews.ts`). Verified this sends permissive CORS headers (reflects
-  whatever `Origin` the browser sends), so no backend proxy was needed. If that ever changes,
-  `useNews.ts` is the one place to point at a backend proxy instead.
-- **Recent Board Decisions** — backend `GET /recent-decisions` (added to `app.py`, reads the
-  already-loaded board CSV, no re-indexing). Clicking a row sends `"Tell me about {title}"` to
-  the chat via the same `useChat().send` the chat input uses — the dashboard/chat tie-in.
+- **Next Meetings** — reads `public/meetings.json`, a **manually maintained** file. Update it
+  monthly: drop past dates, add the next occurrence(s), and verify against
+  https://estero-fl.gov/agendas-minutes/. Cadence notes live in the file's `_comment` field.
+- **Latest from EsteroToday** — fetches the 5 newest posts from EsteroToday's public WordPress
+  REST API (`useNews.ts`).
+- **Upcoming Events** — `GET /api/events` aggregates EsteroToday's Events Calendar (all
+  categories), FGCU Athletics ICS (local games), and optional
+  `public/community-events.json`. Filter chips: All / Government / Music / Markets / Sports /
+  Fairs / Community. Mini-calendar merges these with Village meetings.
+
+Chat questions like "what's happening this weekend?" or "any concerts?" take a structured
+**events** path (no RAG) and return short bullets from the same feed.
 
 A gold notification dot appears on the Pulse tab when a meeting in `meetings.json` falls within
 the next 7 days.
