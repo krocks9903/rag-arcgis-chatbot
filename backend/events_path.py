@@ -28,8 +28,32 @@ _MARKET_RE = re.compile(r"\b(flea\s+market|farmers?\s+market|market)\b", re.IGNO
 _FAIR_RE = re.compile(r"\b(fair|carnival|expo)\b", re.IGNORECASE)
 
 
+# A planning/zoning signal means the question is about the record, not the
+# calendar — "what is happening on Corkscrew Road" is a RAG query that merely
+# opens with an events-sounding phrase. Without this veto the events route
+# short-circuits before the router and answers every such question with the
+# same five upcoming events.
+PLANNING_SIGNAL_RE = re.compile(
+    r"\b("
+    r"road|rd|street|st|avenue|ave|drive|dr|lane|ln|court|ct|"
+    r"boulevard|blvd|parkway|pkwy|way|trail|trl|highway|hwy|"
+    r"zoning|rezone|rezoned|rezoning|plat|replat|variance|easement|"
+    r"ordinance|resolution|amendment|comprehensive\s+plan|"
+    r"council|board|commission|hearing|agenda|minutes|"
+    r"permit|development|developer|parcel|strap|district|"
+    r"annexation|setback|density|acreage|subdivision|"
+    r"\d{4}"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def is_events_question(question: str) -> bool:
-    return bool(EVENTS_INTENT_RE.search(question or ""))
+    q = question or ""
+    if not EVENTS_INTENT_RE.search(q):
+        return False
+    # Planning language wins: fall through to the router and RAG.
+    return not PLANNING_SIGNAL_RE.search(q)
 
 
 def _parse_day(start: str) -> date | None:
