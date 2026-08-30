@@ -19,9 +19,9 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 # Collaborate: Gemini extracts project facts; Haiku writes the citizen summary
 # (Groq is the summary fallback when ANTHROPIC_API_KEY is unset).
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 ENABLE_LLM_COLLABORATE = os.getenv("ENABLE_LLM_COLLABORATE", "true").lower() not in {"0", "false", "no"}
 # Skip LLM when keyword lookup returns a tight hit (app ID or ≤ N rows).
 KEYWORD_FAST_MAX_ROWS = int(os.getenv("KEYWORD_FAST_MAX_ROWS", "6"))
