@@ -3,6 +3,8 @@
 Sources (see backend/events_sources/):
 - EsteroToday The Events Calendar REST API (all categories)
 - FGCU Athletics ICS (local Fort Myers / FGCU games)
+- Lee County Parks & Recreation calendar (HTML)
+- Visit Fort Myers tourism RSS + event detail pages
 - frontend-react/public/community-events.json manual fallback
 
 Fetched server-side so the frontend never needs CORS handling for third-party
@@ -50,7 +52,7 @@ def _meta() -> dict:
     return {
         "chip_order": cfg.get("chip_order") or [],
         "chip_labels": cfg.get("chip_labels") or {},
-        "sources": ["esterotoday", "venue", "manual"],
+        "sources": ["esterotoday", "venue", "lee_county", "manual"],
     }
 
 

@@ -82,9 +82,9 @@ Three widgets on the Pulse tab:
 - **Latest from EsteroToday** — fetches the 5 newest posts from EsteroToday's public WordPress
   REST API (`useNews.ts`).
 - **Upcoming Events** — `GET /api/events` aggregates EsteroToday's Events Calendar (all
-  categories), FGCU Athletics ICS (local games), and optional
-  `public/community-events.json`. Filter chips: All / Government / Music / Markets / Sports /
-  Fairs / Community. Mini-calendar merges these with Village meetings.
+  categories), FGCU Athletics ICS (local games), Lee County Parks calendar, Visit Fort Myers
+  tourism events, and optional `public/community-events.json`. Filter chips: All / Government /
+  Music / Markets / Sports / Fairs / Community. Mini-calendar merges these with Village meetings.
 
 Chat questions like "what's happening this weekend?" or "any concerts?" take a structured
 **events** path (no RAG) and return short bullets from the same feed.

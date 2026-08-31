@@ -75,6 +75,45 @@ def test_sanitize_category_clamps_unknown():
     assert ev["category"] == "other"
 
 
+def test_lee_county_html_parser_extracts_lakes_park():
+    from events_sources.lee_county import _parse_calendar_html
+
+    html = """
+    <span class="calendar_eventtime">8:00 AM</span>
+    <a class="eventLink" title="Lakes Park Bird Patrol Walk"
+       onclick="gotoEvent('/parks/events/event','%7B64d50b61-9b75-485a-b40d-10ff8595e178%7D%3B876.0.2099-09-05T12%3A00%3A00Z',true)"
+       class="calendar_eventlink">Lakes Park Bird Patrol Walk</a>
+    """
+    events = _parse_calendar_html(html)
+    assert len(events) == 1
+    assert events[0]["title"] == "Lakes Park Bird Patrol Walk"
+    assert events[0]["source"] == "lee_county"
+    assert events[0]["start"].startswith("2099-09-05")
+    assert "Lakes Park" in (events[0].get("venue") or "")
+
+
+def test_visitfortmyers_detail_and_rss_parsers():
+    from events_sources.visitfortmyers import _parse_detail, _parse_rss_items
+
+    rss = """<?xml version="1.0"?>
+    <rss version="2.0"><channel>
+      <item><title>Makers Monday</title>
+        <link>https://www.visitfortmyers.com/event/makers-monday/8270</link></item>
+    </channel></rss>"""
+    items = _parse_rss_items(rss)
+    assert items[0]["title"] == "Makers Monday"
+
+    html = """
+    <p class="address"><span class="address-line1">13211 McGregor Blvd</span>
+    <span class="locality">Fort Myers</span></p>
+    <var class="atc_date_start">2099-06-25 19:30:00</var>
+    <var class="atc_date_end">2099-06-25 21:00:00</var>
+    """
+    parsed = _parse_detail(html)
+    assert parsed["start"] == "2099-06-25T19:30:00"
+    assert "Fort Myers" in (parsed["venue"] or "")
+
+
 def test_dedupe_by_title_date_venue():
     a = make_event(
         id="1",

@@ -26,9 +26,9 @@
     "other-event": "other"
   },
   "title_keywords": {
-    "music": ["concert", "music", "musical", "orchestra", "symphony", "band ", "choir", "jazz", "recital", "live music"],
-    "sports": ["soccer", "football", "basketball", "baseball", "softball", "volleyball", "tennis", "golf tournament", "athletic", "vs ", "game day", "match"],
-    "market": ["flea market", "farmers market", "farmer's market", "farmers' market", "artisan market", "craft market"],
+    "music": ["concert", "music", "musical", "orchestra", "symphony", "band ", "choir", "jazz", "recital", "live music", "theatre", "theater", "comedy"],
+    "sports": ["soccer", "football", "basketball", "baseball", "softball", "volleyball", "tennis", "golf tournament", "athletic", "vs ", "game day", "match", "triathlon"],
+    "market": ["flea market", "farmers market", "farmer's market", "farmers' market", "artisan market", "craft market", "makers monday", "food truck"],
     "fair": ["state fair", "county fair", "fairgrounds", "carnival", "expo"]
   },
   "geo_keywords": [
@@ -43,13 +43,17 @@
     "ft. myers",
     "ft myers",
     "lee county",
+    "lakes park",
     "hertz arena",
+    "amerant",
     "gulf coast town center",
     "san carlos park",
     "three oaks",
     "naples",
     "alico arena",
-    "west bay"
+    "west bay",
+    "players circle",
+    "broadway palm"
   ],
   "chip_order": ["government", "music", "market", "sports", "fair", "community", "other"],
   "chip_labels": {
