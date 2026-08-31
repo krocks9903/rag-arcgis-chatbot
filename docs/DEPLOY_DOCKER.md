@@ -157,6 +157,30 @@ curl https://YOUR-SERVICE-URL/ready
 
 Open `https://YOUR-SERVICE-URL/docs` and test `POST /chat`.
 
+### Agent-sync MCP (Streamable HTTP)
+
+The same Cloud Run service exposes **engage-estero-sync** at `/mcp` when
+`ENABLE_MCP_HTTP=true` (set in the Dockerfile + `deploy.yml`).
+
+```powershell
+# Unauthorized without bearer
+curl -i https://YOUR-SERVICE-URL/mcp
+
+# Health flag
+curl -s https://YOUR-SERVICE-URL/health | findstr mcp_http
+```
+
+Point Cursor at the remote MCP:
+
+```powershell
+$env:ENGAGE_MCP_URL = "https://YOUR-SERVICE-URL/mcp"
+$env:ENGAGE_MCP_TOKEN = "<ADMIN_API_KEY or MCP_API_KEY>"
+```
+
+Enable **engage-estero-sync-cloud** under Customize → MCPs. Seed files live in
+`agent-sync/` (baked into the image); runtime writes use `/tmp/agent-sync`
+(ephemeral — commit `agent-sync/` for durable handoffs).
+
 ### Step 8 — Connect the frontend
 
 Edit `frontend/config.js` (or deploy frontend to GitHub Pages):

@@ -18,7 +18,8 @@ def test_app_metadata():
 
 
 def test_expected_routes_registered():
-    paths = {route.path for route in backend_app.app.routes}
+    # Prefer OpenAPI paths — FastAPI may nest included routers without .path.
+    paths = set(backend_app.app.openapi().get("paths", {}))
     assert {
         "/health",
         "/ready",
@@ -29,6 +30,7 @@ def test_expected_routes_registered():
         "/reports",
         "/admin/status",
         "/recent-decisions",
+        "/api/events",
     }.issubset(paths)
 
 
@@ -117,7 +119,7 @@ def test_stale_source_notice_when_older_than_five_years():
 
 
 def test_recency_boost_prefers_newer_when_no_year():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import apply_recency_boost
 
     older = Document(
@@ -134,7 +136,7 @@ def test_recency_boost_prefers_newer_when_no_year():
 
 
 def test_recency_boost_honors_year_in_query():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import apply_recency_boost
 
     d2018 = Document(
@@ -211,7 +213,7 @@ def test_query_wants_recent_detects_conversational_cues():
 
 
 def test_recent_query_hard_filters_old_hits():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import apply_recency_boost
 
     older = Document(
@@ -231,7 +233,7 @@ def test_recent_query_hard_filters_old_hits():
 
 
 def test_recent_query_empty_when_only_old_hits():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import apply_recency_boost, prefer_recent_hits
 
     older = Document(
@@ -244,7 +246,7 @@ def test_recent_query_empty_when_only_old_hits():
 
 
 def test_recency_intent_follows_original_not_rewrite_years():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import apply_recency_boost
 
     older = Document(
@@ -348,7 +350,7 @@ def test_filter_projects_always_sorts_newest_without_recent_cue():
 
 
 def test_document_date_reads_article_publish_date():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import document_meeting_date, format_docs
 
     older = Document(
@@ -375,7 +377,7 @@ def test_document_date_reads_article_publish_date():
 
 
 def test_recency_boost_prefers_newer_article_publish_date():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import apply_recency_boost
 
     older = Document(
@@ -417,7 +419,7 @@ def test_recent_intent_blocks_keyword_shortcut():
 
 
 def test_hits_meta_includes_meeting_dates():
-    from langchain.schema import Document
+    from langchain_core.documents import Document
     from retrieval import hits_meta
 
     doc = Document(

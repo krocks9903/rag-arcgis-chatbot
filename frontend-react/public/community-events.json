@@ -1,4 +1,71 @@
 {
   "_comment": "MANUALLY MAINTAINED community events (flea markets, fairs, one-offs) with no stable API. Same maintenance idea as meetings.json — drop past dates, add upcoming ones. Categories: government | music | market | sports | fair | community | other. Merged into GET /api/events by backend/events_sources/manual.py. Example entry shape: { id, title, start, end, allDay, venue, url, category, location }.",
-  "events": []
+  "events": [
+    {
+      "id": "coconut-point-farmers-market-2026-10-01",
+      "title": "Coconut Point Farmers Market",
+      "start": "2026-10-01T09:00:00",
+      "end": "2026-10-01T13:00:00",
+      "allDay": false,
+      "venue": "Coconut Point Mall — Panera parking lot, 23106 Fashion Dr, Estero",
+      "url": "https://www.buylocallee.com/markets/coconut-point-farmers-market/",
+      "category": "market",
+      "location": "estero"
+    },
+    {
+      "id": "coconut-point-farmers-market-2026-10-08",
+      "title": "Coconut Point Farmers Market",
+      "start": "2026-10-08T09:00:00",
+      "end": "2026-10-08T13:00:00",
+      "allDay": false,
+      "venue": "Coconut Point Mall — Panera parking lot, 23106 Fashion Dr, Estero",
+      "url": "https://www.buylocallee.com/markets/coconut-point-farmers-market/",
+      "category": "market",
+      "location": "estero"
+    },
+    {
+      "id": "coconut-point-farmers-market-2026-10-15",
+      "title": "Coconut Point Farmers Market",
+      "start": "2026-10-15T09:00:00",
+      "end": "2026-10-15T13:00:00",
+      "allDay": false,
+      "venue": "Coconut Point Mall — Panera parking lot, 23106 Fashion Dr, Estero",
+      "url": "https://www.buylocallee.com/markets/coconut-point-farmers-market/",
+      "category": "market",
+      "location": "estero"
+    },
+    {
+      "id": "coconut-point-farmers-market-2026-10-22",
+      "title": "Coconut Point Farmers Market",
+      "start": "2026-10-22T09:00:00",
+      "end": "2026-10-22T13:00:00",
+      "allDay": false,
+      "venue": "Coconut Point Mall — Panera parking lot, 23106 Fashion Dr, Estero",
+      "url": "https://www.buylocallee.com/markets/coconut-point-farmers-market/",
+      "category": "market",
+      "location": "estero"
+    },
+    {
+      "id": "coconut-point-farmers-market-2026-10-29",
+      "title": "Coconut Point Farmers Market",
+      "start": "2026-10-29T09:00:00",
+      "end": "2026-10-29T13:00:00",
+      "allDay": false,
+      "venue": "Coconut Point Mall — Panera parking lot, 23106 Fashion Dr, Estero",
+      "url": "https://www.buylocallee.com/markets/coconut-point-farmers-market/",
+      "category": "market",
+      "location": "estero"
+    },
+    {
+      "id": "lakes-park-bird-walk-reminder-2026-09-13",
+      "title": "Lakes Park Bird Patrol Walk (check Lee Parks calendar)",
+      "start": "2026-09-13T08:00:00",
+      "end": "2026-09-13T10:00:00",
+      "allDay": false,
+      "venue": "Lakes Regional Park, Fort Myers",
+      "url": "https://www.leegov.com/parks/s_events/Pages/default.aspx",
+      "category": "community",
+      "location": "fort_myers"
+    }
+  ]
 }

@@ -28,7 +28,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SENTENCE_TRANSFORMERS_HOME=/app/backend/.cache/sentence-transformers \
     EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 \
     RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 \
-    SERVE_FRONTEND=true
+    SERVE_FRONTEND=true \
+    ENABLE_MCP_HTTP=true \
+    AGENT_SYNC_SEED_DIR=/app/agent-sync \
+    AGENT_SYNC_DIR=/tmp/agent-sync
 
 WORKDIR /app/backend
 
@@ -36,6 +39,8 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
+COPY agent-sync /app/agent-sync
+COPY tools/engage-estero-mcp /app/tools/engage-estero-mcp
 COPY --from=frontend-build /web/dist /app/frontend
 
 # Pre-download models and bake FAISS + BM25 index for fast Cloud Run cold starts.

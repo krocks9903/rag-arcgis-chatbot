@@ -10,10 +10,10 @@ from collections.abc import Iterator
 from datetime import date, timedelta
 from typing import Any, Literal
 
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from config import (
     ANTHROPIC_MODEL,

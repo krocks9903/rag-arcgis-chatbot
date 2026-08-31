@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 # Avoid importing the real torch/sentence-transformers stack in lightweight CI.
 sys.modules.setdefault("sentence_transformers", MagicMock())
 
-from langchain.schema import Document  # noqa: E402
+from langchain_core.documents import Document  # noqa: E402
 
 from reranker import rerank  # noqa: E402
 

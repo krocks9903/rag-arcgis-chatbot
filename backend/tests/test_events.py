@@ -212,3 +212,132 @@ def test_answer_upcoming_events_empty_window(monkeypatch):
     assert result.route == "events"
     assert result.meta.get("events_count") == 0
     assert "don't have upcoming" in result.summary.lower()
+
+
+def test_ics_util_parses_utc_and_all_day():
+    from events_sources.ics_util import clean_ics_text, iter_vevents, parse_ics_dt
+
+    iso, all_day = parse_ics_dt("20260915")
+    assert iso.startswith("2026-09-15T00:00:00")
+    assert all_day is True
+
+    iso_z, all_day_z = parse_ics_dt("20260915T163000Z")
+    assert all_day_z is False
+    assert iso_z.startswith("2026-09-15T")
+
+    body = (
+        "BEGIN:VCALENDAR\n"
+        "BEGIN:VEVENT\n"
+        "SUMMARY:FGCU Soccer\\, Home\n"
+        "DTSTART:20260920T190000Z\n"
+        "LOCATION:Fort Myers\\, Fla.\n"
+        "END:VEVENT\n"
+        "END:VCALENDAR\n"
+    )
+    blocks = list(iter_vevents(body))
+    assert len(blocks) == 1
+    assert "FGCU Soccer" in clean_ics_text("FGCU Soccer\\, Home")
+
+
+def test_visitfortmyers_keeps_multi_day_still_running(monkeypatch):
+    from events_sources import visitfortmyers as vfm
+
+    today = __import__("datetime").date.today()
+    started = (today.replace(day=1) if today.day > 1 else today).isoformat()
+    # End a week from today so the listing is still active.
+    end = (today.toordinal() + 7)
+    end_s = __import__("datetime").date.fromordinal(end).isoformat()
+
+    rss = f"""<?xml version="1.0"?>
+    <rss version="2.0"><channel>
+      <item><title>Running Show</title>
+        <link>https://www.visitfortmyers.com/event/running-show/9999</link></item>
+      <item><title>Expired Show</title>
+        <link>https://www.visitfortmyers.com/event/expired-show/8888</link></item>
+    </channel></rss>"""
+
+    details = {
+        "https://www.visitfortmyers.com/event/running-show/9999": f"""
+            <p class="address"><span class="address-line1">100 Main St</span>
+            <span class="locality">Fort Myers</span></p>
+            <var class="atc_date_start">{started} 19:30:00</var>
+            <var class="atc_date_end">{end_s} 21:00:00</var>
+        """,
+        "https://www.visitfortmyers.com/event/expired-show/8888": """
+            <p class="address"><span class="address-line1">100 Main St</span>
+            <span class="locality">Fort Myers</span></p>
+            <var class="atc_date_start">2020-01-01 19:30:00</var>
+            <var class="atc_date_end">2020-01-02 21:00:00</var>
+        """,
+    }
+
+    class _Resp:
+        def __init__(self, text: str, status: int = 200):
+            self.text = text
+            self.status_code = status
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError("http error")
+
+    def _get(url, **_kwargs):
+        if "rss" in url:
+            return _Resp(rss)
+        for key, html in details.items():
+            if key in url or url.rstrip("/") == key.rstrip("/"):
+                return _Resp(html)
+        return _Resp("", 404)
+
+    monkeypatch.setattr(vfm.requests, "get", _get)
+    events = vfm.fetch_visitfortmyers_events(limit=5)
+    titles = {e["title"] for e in events}
+    assert "Running Show" in titles
+    assert "Expired Show" not in titles
+    assert events[0]["source"] == "lee_county"
+
+
+def test_manual_events_load_from_public_json():
+    from events_sources.manual import fetch_manual_events
+
+    events = fetch_manual_events()
+    assert events, "community-events.json should have upcoming seed events"
+    assert all(e["source"] == "manual" for e in events)
+    assert any("Farmers Market" in e["title"] for e in events)
+    assert all(e["start"][:10] >= __import__("datetime").date.today().isoformat() for e in events)
+
+
+def test_aggregate_merges_lee_and_vfm(monkeypatch):
+    from events_sources import aggregate
+
+    def _one(source: str, title: str, start: str):
+        return [
+            make_event(
+                id=f"{source}-1",
+                title=title,
+                start=start,
+                end=start,
+                all_day=False,
+                venue="Estero",
+                url="",
+                category="community",
+                source=source,
+            )
+        ]
+
+    monkeypatch.setattr(aggregate, "fetch_esterotoday_events", lambda: [])
+    monkeypatch.setattr(aggregate, "fetch_fgcu_events", lambda: [])
+    monkeypatch.setattr(
+        aggregate,
+        "fetch_lee_county_events",
+        lambda: _one("lee_county", "Lakes Park Walk", "2099-01-10T08:00:00"),
+    )
+    monkeypatch.setattr(
+        aggregate,
+        "fetch_visitfortmyers_events",
+        lambda: _one("lee_county", "Fort Myers Show", "2099-01-11T19:00:00"),
+    )
+    monkeypatch.setattr(aggregate, "fetch_manual_events", lambda: [])
+
+    merged = aggregate.collect_upcoming_events()
+    assert len(merged) == 2
+    assert {e["title"] for e in merged} == {"Lakes Park Walk", "Fort Myers Show"}

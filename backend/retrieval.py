@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from langchain.schema import Document
+from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
 
 from config import (

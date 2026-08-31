@@ -1,0 +1,11 @@
+{
+  "_comment": "Merge into .cursor/mcp.json (or paste under mcpServers) after deploy. Set ENGAGE_MCP_URL + ENGAGE_MCP_TOKEN in your shell/Cursor env.",
+  "mcpServers": {
+    "engage-estero-sync-cloud": {
+      "url": "${env:ENGAGE_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${env:ENGAGE_MCP_TOKEN}"
+      }
+    }
+  }
+}

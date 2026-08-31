@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import traceback
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -16,6 +16,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from admin_auth import require_admin
+from agent_sync_mcp import (
+    mcp as agent_sync_mcp,
+    mcp_bearer_token,
+    mcp_http_enabled,
+    prepare_runtime_sync_dir,
+)
 from config import (
     DATA_DIR,
     DEFAULT_CSV_PATH,
@@ -40,7 +46,6 @@ from rate_limit import enforce_rate_limit
 from reports import create_report, list_reports, report_counts, update_report
 from schema_aliases import row_value
 from store import build_store, get_store
-
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BACKEND_DIR, ".env"))
 
@@ -98,23 +103,30 @@ def _warm_models() -> dict[str, bool]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if os.path.exists(DEFAULT_CSV_PATH):
-        build_store(DEFAULT_CSV_PATH)
-        # Warm models in the background so /ready is not blocked for the startup probe.
-        import threading
+    async with AsyncExitStack() as stack:
+        if mcp_http_enabled():
+            prepare_runtime_sync_dir()
+            # Required for Streamable HTTP session manager (Cloud Run / multi-instance).
+            await stack.enter_async_context(agent_sync_mcp.session_manager.run())
+            logger.info("engage-estero-sync MCP mounted (Streamable HTTP)")
 
-        def _bg_warm():
-            try:
-                status = _warm_models()
-                logger.info("Startup warmup: %s", status)
-            except Exception:
-                traceback.print_exc()
-                logger.warning("Startup warmup failed; first RAG request may be slow")
+        if os.path.exists(DEFAULT_CSV_PATH):
+            build_store(DEFAULT_CSV_PATH)
+            # Warm models in the background so /ready is not blocked for the startup probe.
+            import threading
 
-        threading.Thread(target=_bg_warm, daemon=True, name="model-warmup").start()
-    else:
-        print(f"No CSV at {DEFAULT_CSV_PATH} — run pipeline/build.py or upload via /load")
-    yield
+            def _bg_warm():
+                try:
+                    status = _warm_models()
+                    logger.info("Startup warmup: %s", status)
+                except Exception:
+                    traceback.print_exc()
+                    logger.warning("Startup warmup failed; first RAG request may be slow")
+
+            threading.Thread(target=_bg_warm, daemon=True, name="model-warmup").start()
+        else:
+            print(f"No CSV at {DEFAULT_CSV_PATH} — run pipeline/build.py or upload via /load")
+        yield
 
 
 app = FastAPI(title="Engage Estero RAG API", lifespan=lifespan)
@@ -126,6 +138,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(events_router)
+
+
+class McpAuthMiddleware(BaseHTTPMiddleware):
+    """Require Bearer MCP_API_KEY (or ADMIN_API_KEY) for /mcp Streamable HTTP."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/mcp" or request.url.path.startswith("/mcp/"):
+            expected = mcp_bearer_token()
+            if not expected:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    {"detail": "MCP not configured. Set MCP_API_KEY or ADMIN_API_KEY."},
+                    status_code=503,
+                )
+            auth = request.headers.get("authorization") or ""
+            if not auth.startswith("Bearer ") or auth[len("Bearer ") :].strip() != expected:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
+if mcp_http_enabled():
+    app.add_middleware(McpAuthMiddleware)
+    # streamable_http_path="/" → public URL is https://…/mcp
+    app.mount("/mcp", agent_sync_mcp.streamable_http_app())
 
 
 class StaticCacheMiddleware(BaseHTTPMiddleware):
@@ -167,6 +206,7 @@ def health():
         "record_count": _record_count(),
         "chunk_count": store.chunk_count if store else 0,
         "embedding_model": EMBEDDING_MODEL,
+        "mcp_http": mcp_http_enabled(),
     }
 
 
@@ -310,9 +350,11 @@ def feedback(req: FeedbackRequest, _: None = Depends(enforce_rate_limit("public_
 @app.post("/load")
 async def load_csv(file: UploadFile = File(...), _: None = Depends(require_admin)):
     """Replace the in-memory corpus (admin only). Prefer pipeline rebuild in production."""
-    raw_name = os.path.basename(file.filename or "upload.csv")
-    if not _SAFE_CSV_NAME.match(raw_name):
+    raw_name = file.filename or "upload.csv"
+    # Reject path components before basename so ../../evil.csv cannot sneak through.
+    if raw_name != os.path.basename(raw_name) or not _SAFE_CSV_NAME.match(os.path.basename(raw_name)):
         raise HTTPException(400, "Filename must be a simple .csv name")
+    raw_name = os.path.basename(raw_name)
     os.makedirs(DATA_DIR, exist_ok=True)
     dest = os.path.join(DATA_DIR, raw_name)
     with open(dest, "wb") as f:

@@ -32,7 +32,7 @@ import os
 import time
 
 from ingest import strip_header_lines
-from langchain.schema import Document
+from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
 
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")

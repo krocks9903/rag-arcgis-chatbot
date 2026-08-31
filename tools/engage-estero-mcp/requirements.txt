@@ -1,0 +1,3 @@
+# Local MCP server for Engage Estero agent sync (Cursor stdio).
+# Install into the project venv: pip install -r tools/engage-estero-mcp/requirements.txt
+mcp>=1.9,<2

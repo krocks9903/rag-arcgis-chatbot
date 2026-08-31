@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "engage-estero-sync": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["${workspaceFolder}/tools/engage-estero-mcp/server.py"],
+      "env": {
+        "AGENT_SYNC_DIR": "${workspaceFolder}/agent-sync"
+      }
+    }
+  }
+}

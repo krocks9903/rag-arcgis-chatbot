@@ -1,0 +1,49 @@
+{
+  "project": "rag-arcgis-chatbot",
+  "product": "Ask Engage Estero",
+  "updated_at": "2026-08-31T17:39:26Z",
+  "updated_by": "nolan",
+  "team": {
+    "nolan": {
+      "github": "noleysc",
+      "role": "QA / tests / release checklist"
+    },
+    "ethan": {
+      "github": null,
+      "role": "backend RAG / retrieval / routing"
+    },
+    "krish": {
+      "github": null,
+      "role": "frontend Pulse / React UI"
+    }
+  },
+  "active_focus": "Events sources + test green + agent sync MCP",
+  "priorities": [
+    "Ship Lee County Parks + Visit Fort Myers events (committed locally as 8782ccb; push pending)",
+    "Land test/content fixes (langchain imports, meetings + community-events seeds) \u2014 uncommitted",
+    "tracker.esterotoday.com DNS (IONOS/GoDaddy nameserver ownership) \u2014 blocked on Kim/access",
+    "Avoid Hertz/Amerant scrapers until a stable public feed exists"
+  ],
+  "owners": {
+    "backend/events_sources": "nolan",
+    "backend/tests": "nolan",
+    "backend/retrieval": "ethan",
+    "backend/rag_path": "ethan",
+    "frontend-react": "krish",
+    "pipeline": "shared"
+  },
+  "claims": [],
+  "blockers": [
+    {
+      "id": "dns-tracker",
+      "summary": "Domain mapping blocked until correct GoDaddy/IONOS DNS account access",
+      "owner": "kim"
+    }
+  ],
+  "do_not": [
+    "Let events chat route hijack planning/zoning questions (PLANNING_SIGNAL_RE)",
+    "Commit docs/Ask_Engage_Estero_Stakeholder_Briefing.pptx unless asked",
+    "Force-push main",
+    "Invent venue scrapers that fail hard \u2014 soft-fail per source"
+  ]
+}

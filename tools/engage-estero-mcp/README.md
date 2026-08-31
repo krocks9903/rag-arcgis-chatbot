@@ -1,0 +1,43 @@
+# engage-estero-sync MCP
+
+Coordination MCP for Nolan / Ethan / Krish Cursor agents.
+
+## Local (stdio)
+
+```bash
+.venv/bin/pip install -r tools/engage-estero-mcp/requirements.txt
+# or: pip install -r backend/requirements.txt
+```
+
+Cursor loads `.cursor/mcp.json` → **engage-estero-sync**.
+
+## Cloud Run (Streamable HTTP)
+
+Deployed with the main API container (`ENABLE_MCP_HTTP=true`):
+
+| | |
+| --- | --- |
+| URL | `https://<Cloud Run service>.run.app/mcp` |
+| Auth | `Authorization: Bearer <MCP_API_KEY>` (defaults to `ADMIN_API_KEY`) |
+| Transport | Streamable HTTP, `stateless_http=True` |
+
+Cursor remote entry — copy [`.cursor/mcp.cloud.example.json`](../../.cursor/mcp.cloud.example.json)
+into `.cursor/mcp.json`, then:
+
+```bash
+export ENGAGE_MCP_URL="https://YOUR-SERVICE.run.app/mcp"
+export ENGAGE_MCP_TOKEN="your-admin-or-mcp-key"
+```
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `get_shared_context` | Priorities, owners, claims, blockers |
+| `update_shared_context` | Patch focus / priorities / blockers |
+| `get_conventions` | Team process + coding rules |
+| `list_handoffs` | Recent handoff notes |
+| `write_handoff` | Leave a note for the next agent |
+| `claim_area` / `release_area` | Soft locks |
+
+State: `agent-sync/` in git (seed). On Cloud Run, copied to `/tmp/agent-sync` for writes (ephemeral per instance — commit seed updates for durable sync).

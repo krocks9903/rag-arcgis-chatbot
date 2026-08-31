@@ -1,0 +1,26 @@
+---
+description: Engage Estero multi-agent coordination via engage-estero-sync MCP
+alwaysApply: true
+---
+
+# Agent sync (Engage Estero)
+
+Before non-trivial work in this repo:
+
+1. Call MCP **`get_shared_context`** (server `engage-estero-sync`).
+2. Call **`list_handoffs`** if another teammate may have left unfinished work.
+3. Skim **`get_conventions`** when unsure about git identity, events routing, or Pulse JSON.
+
+While working:
+
+- Soft-lock hot areas with **`claim_area`** (e.g. `backend/events_sources`, `frontend-react`).
+- Do not invent parallel status docs outside `agent-sync/`.
+
+Before ending a session with unfinished work or ownership changes:
+
+- **`write_handoff`** (from → to + summary of done / next / verify).
+- **`release_area`** for any claims you held.
+- **`update_shared_context`** when priorities or blockers change.
+- Remind the human to **commit `agent-sync/**`** so teammates pull the same state (stdio MCP is per-machine; git is the sync bus).
+
+Team defaults: Nolan (`noleysc`) QA; Ethan backend RAG; Krish frontend.

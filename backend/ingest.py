@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 import pandas as pd
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from schema_aliases import row_value

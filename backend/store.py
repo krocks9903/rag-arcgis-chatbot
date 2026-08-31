@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from rank_bm25 import BM25Okapi

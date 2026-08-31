@@ -34,7 +34,7 @@ def client(tmp_path, monkeypatch):
 def test_expected_admin_and_report_routes():
     import app as backend_app
 
-    paths = {route.path for route in backend_app.app.routes}
+    paths = set(backend_app.app.openapi().get("paths", {}))
     assert {"/reports", "/admin/status", "/admin/reports", "/admin", "/load"}.issubset(paths)
 
 
