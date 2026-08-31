@@ -96,5 +96,15 @@
   {
     "question": "Via Coconut Point Drive projects",
     "route": "mixed"
+  },
+  {
+    "question": "What happened with RiverCreek?",
+    "route": "rag",
+    "must_contain": ["River"]
+  },
+  {
+    "question": "How many continued projects in 2024?",
+    "route": "structured",
+    "min_rows": 0
   }
 ]

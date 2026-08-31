@@ -121,9 +121,55 @@ def test_dedupe_by_title_date_venue():
         ("Any concerts near Estero?", True),
         ("upcoming flea markets", True),
         ("FGCU sports events this week", True),
+        ("things to do this weekend", True),
+        ("live music near Estero", True),
+        # Planning/zoning language must NOT take the events shortcut
         ("What was approved on Corkscrew?", False),
+        ("what is happening on Corkscrew Road", False),
+        ("What's happening with the Wawa rezoning?", False),
+        ("upcoming events for the zoning board hearing", False),
         ("DOS2024-E001", False),
+        ("How many records were approved in 2023?", False),
     ],
 )
 def test_is_events_question(question, expected):
     assert is_events_question(question) is expected
+
+
+def test_answer_upcoming_events_formats_bullets(monkeypatch):
+    from events_path import answer_upcoming_events
+
+    today = __import__("datetime").date.today()
+    start = f"{today.isoformat()}T18:00:00"
+    monkeypatch.setattr(
+        "events_path.list_upcoming_events",
+        lambda: [
+            {
+                "id": "et-1",
+                "title": "Estero Farmers Market",
+                "start": start,
+                "end": start,
+                "allDay": False,
+                "venue": "Coconut Point",
+                "url": "https://esterotoday.com/events/example",
+                "category": "market",
+                "source": "esterotoday",
+            }
+        ],
+    )
+    # Use a 21-day window query (not weekend-only) so the test is weekday-safe.
+    result = answer_upcoming_events("upcoming flea markets")
+    assert result.route == "events"
+    assert result.meta.get("llm_skipped") is True
+    assert "Farmers Market" in result.summary
+    assert result.summary.strip().startswith("- ")
+
+
+def test_answer_upcoming_events_empty_window(monkeypatch):
+    from events_path import answer_upcoming_events
+
+    monkeypatch.setattr("events_path.list_upcoming_events", lambda: [])
+    result = answer_upcoming_events("any concerts this weekend?")
+    assert result.route == "events"
+    assert result.meta.get("events_count") == 0
+    assert "don't have upcoming" in result.summary.lower()

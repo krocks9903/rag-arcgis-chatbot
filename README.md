@@ -102,6 +102,8 @@ python scripts/eval_quality.py --variant concise --limit 10
 
 Reports land in `backend/data/eval_reports/` (gitignored).
 
+**Release QA checklist:** **[docs/QA_RELEASE_CHECKLIST.md](docs/QA_RELEASE_CHECKLIST.md)** — run before/after Cloud Run deploys.
+
 **Retrieval sweep:**
 
 ```bash

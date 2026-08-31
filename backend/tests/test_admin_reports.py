@@ -83,6 +83,16 @@ def test_load_requires_admin(client):
     assert client.post("/load", files=files).status_code == 401
 
 
+def test_load_rejects_path_traversal_filename(client):
+    files = {"file": ("../../evil.csv", "a,b\n1,2\n", "text/csv")}
+    res = client.post(
+        "/load",
+        files=files,
+        headers={"Authorization": "Bearer test-admin-key"},
+    )
+    assert res.status_code == 400
+
+
 def test_update_report_status(client):
     created = client.post(
         "/reports",
