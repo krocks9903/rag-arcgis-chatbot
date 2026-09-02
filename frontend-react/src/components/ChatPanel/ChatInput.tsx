@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import PromptHelpDialog from "../PromptHelp/PromptHelpDialog";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -8,6 +9,7 @@ interface ChatInputProps {
 
 export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [value, setValue] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const autoResize = () => {
@@ -35,6 +37,16 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   return (
     <div id="input-bar">
       <div id="input-wrap">
+        <button
+          type="button"
+          className="btn-prompt-help"
+          onClick={() => setHelpOpen(true)}
+          title="Help me ask a question"
+          aria-label="Help me ask a question"
+          disabled={disabled}
+        >
+          ?
+        </button>
         <label htmlFor="question" className="sr-only">
           Ask a question
         </label>
@@ -57,6 +69,11 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
         </button>
       </div>
       <div id="input-footer">Data: Village of Estero Planning, Zoning &amp; Design Board · Built by Engage Estero</div>
+      <PromptHelpDialog
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onPickPrompt={(prompt) => onSend(prompt)}
+      />
     </div>
   );
 }

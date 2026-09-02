@@ -696,6 +696,30 @@
   height: 16px;
   fill: white;
 }
+.btn-prompt-help {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  color: var(--navy);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.btn-prompt-help:hover:not(:disabled) {
+  border-color: var(--navy);
+  background: var(--navy-light);
+}
+.btn-prompt-help:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 #input-footer {
   text-align: center;
   font-size: 11px;
@@ -1696,4 +1720,142 @@ a.meeting-row-link:hover .meeting-name {
 }
 .report-form-status.err {
   color: var(--denied);
+}
+
+/* PROMPT HELP DIALOG */
+.prompt-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(18, 36, 64, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.prompt-help-dialog {
+  background: var(--white);
+  border-radius: 14px;
+  width: min(520px, 100%);
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  color: var(--text);
+  padding: 20px 22px 18px;
+}
+.prompt-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.prompt-help-head h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--navy);
+}
+.prompt-help-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.prompt-help-close:hover {
+  background: var(--bg);
+  color: var(--navy);
+}
+.prompt-help-intro {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.prompt-help-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--navy);
+  margin-bottom: 6px;
+}
+.prompt-help-dialog input[type="text"] {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: var(--font);
+  margin-bottom: 16px;
+  background: var(--white);
+  color: var(--text);
+}
+.prompt-help-dialog input[type="text"]:focus {
+  outline: none;
+  border-color: var(--navy);
+}
+.prompt-help-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prompt-help-chip {
+  width: 100%;
+  text-align: left;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.prompt-help-chip:hover {
+  border-color: var(--navy);
+  background: var(--navy-light);
+}
+.prompt-help-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.btn-prompt-primary,
+.btn-prompt-secondary {
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-prompt-primary {
+  background: var(--navy);
+  color: var(--white);
+  border: none;
+}
+.btn-prompt-primary:hover:not(:disabled) {
+  background: var(--navy-dark);
+}
+.btn-prompt-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-prompt-secondary {
+  background: var(--white);
+  color: var(--navy);
+  border: 1.5px solid var(--border);
+}
+.btn-prompt-secondary:hover {
+  border-color: var(--navy);
+  background: var(--navy-light);
 }
