@@ -80,10 +80,8 @@ _HTTP_MODE = os.getenv("ENABLE_MCP_HTTP", "false").lower() not in {"0", "false",
 mcp = FastMCP(
     "engage-estero-sync",
     instructions=(
-        "Engage Estero multi-agent coordination. Call get_shared_context before "
-        "non-trivial work; write_handoff before ending a session with unfinished work; "
-        "claim_area/release_area for soft locks. Commit agent-sync/ after local updates; "
-        "Cloud Run serves the same tools over Streamable HTTP at /mcp."
+        "Engage Estero agent coordination. Start non-trivial work with get_session_brief; "
+        "end sessions with write_handoff and release_area. Commit agent-sync/ after updates."
     ),
     stateless_http=True,
     json_response=True,
@@ -130,10 +128,61 @@ def _slug(value: str) -> str:
     return cleaned or "agent"
 
 
+def _dump(data: Any) -> str:
+    return json.dumps(data, separators=(",", ":"))
+
+
+def _handoff_files(limit: int) -> list[Path]:
+    _, _, handoffs_dir = _paths()
+    handoffs_dir.mkdir(parents=True, exist_ok=True)
+    files = sorted(
+        [p for p in handoffs_dir.glob("*.md") if p.name.upper() != "README.MD"],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return files[: max(1, min(limit, 50))]
+
+
+def _excerpt(text: str, max_chars: int) -> str:
+    cleaned = text.strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max_chars - 1].rstrip() + "…"
+
+
+def _latest_handoff(excerpt_chars: int = 400) -> dict[str, str] | None:
+    files = _handoff_files(1)
+    if not files:
+        return None
+    path = files[0]
+    return {"file": path.name, "excerpt": _excerpt(path.read_text(encoding="utf-8"), excerpt_chars)}
+
+
+@mcp.tool()
+def get_session_brief() -> str:
+    """Compact session start: focus, priorities, claims, blockers, latest handoff excerpt."""
+    ctx = _read_context()
+    blockers = [
+        {"id": b.get("id"), "summary": b.get("summary")}
+        for b in (ctx.get("blockers") or [])
+        if isinstance(b, dict)
+    ]
+    brief = {
+        "version": ctx.get("updated_at"),
+        "active_focus": ctx.get("active_focus"),
+        "priorities": ctx.get("priorities") or [],
+        "claims": ctx.get("claims") or [],
+        "blockers": blockers,
+        "do_not": ctx.get("do_not") or [],
+        "latest_handoff": _latest_handoff(),
+    }
+    return _dump(brief)
+
+
 @mcp.tool()
 def get_shared_context() -> str:
-    """Read Engage Estero shared priorities, owners, claims, and blockers."""
-    return json.dumps(_read_context(), indent=2)
+    """Full shared context JSON (prefer get_session_brief for session start)."""
+    return _dump(_read_context())
 
 
 @mcp.tool()
@@ -147,21 +196,29 @@ def get_conventions() -> str:
 
 
 @mcp.tool()
-def list_handoffs(limit: int = 10) -> str:
-    """List recent handoff notes (newest first)."""
-    _, _, handoffs_dir = _paths()
-    handoffs_dir.mkdir(parents=True, exist_ok=True)
-    files = sorted(
-        [p for p in handoffs_dir.glob("*.md") if p.name.upper() != "README.MD"],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )[: max(1, min(limit, 50))]
+def list_handoffs(limit: int = 3, excerpt_chars: int = 400) -> str:
+    """Recent handoff excerpts (newest first). Use get_handoff for full body."""
+    files = _handoff_files(limit)
     if not files:
-        return "No handoffs yet."
-    parts: list[str] = []
-    for path in files:
-        parts.append(f"## {path.name}\n\n{path.read_text(encoding='utf-8').strip()}\n")
-    return "\n---\n\n".join(parts)
+        return _dump({"handoffs": []})
+    items = [
+        {"file": path.name, "excerpt": _excerpt(path.read_text(encoding="utf-8"), excerpt_chars)}
+        for path in files
+    ]
+    return _dump({"handoffs": items})
+
+
+@mcp.tool()
+def get_handoff(filename: str) -> str:
+    """Read one handoff note by filename (from list_handoffs)."""
+    _, _, handoffs_dir = _paths()
+    safe = Path(filename).name
+    if safe != filename or safe.upper() == "README.MD":
+        return _dump({"error": "invalid filename"})
+    path = handoffs_dir / safe
+    if not path.is_file():
+        return _dump({"error": "not found", "file": safe})
+    return path.read_text(encoding="utf-8").strip()
 
 
 @mcp.tool()
@@ -222,7 +279,7 @@ def update_shared_context(
     ctx["blockers"] = blockers
     ctx["updated_by"] = _slug(updated_by)
     _write_context(ctx)
-    return json.dumps(ctx, indent=2)
+    return _dump({"ok": True, "version": ctx.get("updated_at")})
 
 
 @mcp.tool()
@@ -233,9 +290,14 @@ def claim_area(area: str, agent: str, note: str = "") -> str:
     area_key = area.strip()
     for claim in claims:
         if claim.get("area") == area_key and claim.get("agent") != _slug(agent):
-            return (
-                f"BLOCKED: {area_key} already claimed by {claim.get('agent')} "
-                f"({claim.get('note') or 'no note'}). Coordinate before editing."
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "blocked",
+                    "area": area_key,
+                    "claimed_by": claim.get("agent"),
+                    "note": claim.get("note") or "",
+                }
             )
     claims = [c for c in claims if c.get("area") != area_key]
     claims.append(
@@ -249,7 +311,7 @@ def claim_area(area: str, agent: str, note: str = "") -> str:
     ctx["claims"] = claims
     ctx["updated_by"] = _slug(agent)
     _write_context(ctx)
-    return json.dumps({"ok": True, "claims": claims}, indent=2)
+    return _dump({"ok": True, "area": area_key})
 
 
 @mcp.tool()
@@ -265,13 +327,13 @@ def release_area(area: str, agent: str) -> str:
     ctx["claims"] = after
     ctx["updated_by"] = _slug(agent)
     _write_context(ctx)
-    return json.dumps({"released": len(before) - len(after), "claims": after}, indent=2)
+    return _dump({"ok": True, "released": len(before) - len(after)})
 
 
 @mcp.resource("agent-sync://context")
 def resource_context() -> str:
     """Shared priorities / owners / blockers."""
-    return json.dumps(_read_context(), indent=2)
+    return _dump(_read_context())
 
 
 @mcp.resource("agent-sync://conventions")

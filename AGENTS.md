@@ -16,20 +16,13 @@
 
 ## Coordination
 
-Use the **`engage-estero-sync`** MCP:
+Use the **`engage-estero-sync`** MCP (`.cursor/mcp.json` → local stdio or Cloud Run `/mcp`).
 
-- **Local (stdio):** `.cursor/mcp.json` → `tools/engage-estero-mcp/server.py`
-- **Cloud Run (Streamable HTTP):** `https://<service>.run.app/mcp` with
-  `Authorization: Bearer <MCP_API_KEY|ADMIN_API_KEY>`.
-  Copy `.cursor/mcp.cloud.example.json` into `.cursor/mcp.json` and set
-  `ENGAGE_MCP_URL` + `ENGAGE_MCP_TOKEN`.
+**Session start:** `get_session_brief` once. **Session end:** `write_handoff`, `release_area`, `update_shared_context` as needed.
 
-Tools: `get_shared_context` / `update_shared_context` / `get_conventions` /
-`list_handoffs` / `write_handoff` / `claim_area` / `release_area`
+Other tools: `get_handoff`, `list_handoffs`, `claim_area`, `get_conventions`, `get_shared_context` (full dump).
 
-Shared seed state is git-tracked under `agent-sync/` (baked into the image;
-runtime writes go to `/tmp/agent-sync` on Cloud Run). Pull before starting;
-commit `agent-sync/` when priorities/handoffs should survive the next deploy.
+Shared state lives in `agent-sync/` (git). Commit after MCP updates so teammates stay in sync.
 
 ## Hard constraints
 

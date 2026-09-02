@@ -1,7 +1,9 @@
 """Agent-sync MCP helpers + Cloud Run HTTP auth gate."""
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -70,3 +72,90 @@ def test_mcp_http_auth_middleware(monkeypatch):
     assert client.get("/mcp").status_code == 401
     assert client.get("/mcp", headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/mcp", headers={"Authorization": "Bearer secret-token"}).status_code == 200
+
+
+def test_get_session_brief_compact(tmp_path, monkeypatch):
+    import json
+
+    from agent_sync_mcp import get_session_brief, get_shared_context
+
+    sync = tmp_path / "sync"
+    sync.mkdir()
+    (sync / "handoffs").mkdir()
+    ctx = {
+        "project": "t",
+        "updated_at": "2026-09-02T00:00:00Z",
+        "active_focus": "ci",
+        "priorities": ["ship"],
+        "claims": [],
+        "blockers": [{"id": "dns", "summary": "waiting"}],
+        "do_not": ["force-push main"],
+    }
+    (sync / "shared-context.json").write_text(json.dumps(ctx), encoding="utf-8")
+    (sync / "handoffs" / "2026-09-01-a.md").write_text("# Old\n\nstale\n", encoding="utf-8")
+    new = sync / "handoffs" / "2026-09-02-b.md"
+    new.write_text("# New\n\nfresh handoff body\n", encoding="utf-8")
+    now = time.time()
+    os.utime(sync / "handoffs" / "2026-09-01-a.md", (now - 60, now - 60))
+    os.utime(new, (now, now))
+
+    monkeypatch.setenv("AGENT_SYNC_DIR", str(sync))
+
+    brief = json.loads(get_session_brief())
+    assert brief["version"] == "2026-09-02T00:00:00Z"
+    assert brief["active_focus"] == "ci"
+    assert brief["blockers"] == [{"id": "dns", "summary": "waiting"}]
+    assert brief["latest_handoff"]["file"] == "2026-09-02-b.md"
+    assert "fresh" in brief["latest_handoff"]["excerpt"]
+    assert "team" not in brief
+
+    full = json.loads(get_shared_context())
+    assert full["project"] == "t"
+    assert "\n" not in get_shared_context()
+
+
+def test_list_handoffs_excerpt_and_get_handoff(tmp_path, monkeypatch):
+    import json
+
+    from agent_sync_mcp import get_handoff, list_handoffs
+
+    sync = tmp_path / "sync"
+    (sync / "handoffs").mkdir(parents=True)
+    long_body = "x" * 500
+    (sync / "handoffs" / "note.md").write_text(f"# Title\n\n{long_body}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_SYNC_DIR", str(sync))
+
+    listed = json.loads(list_handoffs(limit=1, excerpt_chars=50))
+    assert len(listed["handoffs"]) == 1
+    assert len(listed["handoffs"][0]["excerpt"]) <= 50
+    assert listed["handoffs"][0]["file"] == "note.md"
+
+    full = get_handoff("note.md")
+    assert long_body in full
+    assert json.loads(get_handoff("../etc/passwd"))["error"] == "invalid filename"
+
+
+def test_write_tools_return_compact_ack(tmp_path, monkeypatch):
+    import json
+
+    from agent_sync_mcp import claim_area, release_area, update_shared_context
+
+    sync = tmp_path / "sync"
+    sync.mkdir()
+    (sync / "shared-context.json").write_text('{"claims":[],"blockers":[]}\n', encoding="utf-8")
+    monkeypatch.setenv("AGENT_SYNC_DIR", str(sync))
+
+    claimed = json.loads(claim_area("backend/tests", "nolan", note="pytest"))
+    assert claimed == {"ok": True, "area": "backend/tests"}
+
+    blocked = json.loads(claim_area("backend/tests", "ethan"))
+    assert blocked["ok"] is False
+    assert blocked["error"] == "blocked"
+
+    updated = json.loads(update_shared_context(active_focus="tests", updated_by="nolan"))
+    assert updated["ok"] is True
+    assert "version" in updated
+    assert "priorities" not in updated
+
+    released = json.loads(release_area("backend/tests", "nolan"))
+    assert released == {"ok": True, "released": 1}

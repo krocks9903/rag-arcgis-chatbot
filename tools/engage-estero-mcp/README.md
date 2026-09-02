@@ -33,10 +33,12 @@ export ENGAGE_MCP_TOKEN="your-admin-or-mcp-key"
 
 | Tool | Purpose |
 | --- | --- |
-| `get_shared_context` | Priorities, owners, claims, blockers |
+| `get_session_brief` | **Session start** — compact focus, priorities, claims, blockers, latest handoff excerpt |
+| `get_shared_context` | Full context JSON (prefer brief for startup) |
 | `update_shared_context` | Patch focus / priorities / blockers |
-| `get_conventions` | Team process + coding rules |
-| `list_handoffs` | Recent handoff notes |
+| `get_conventions` | Team process + coding rules (on demand) |
+| `list_handoffs` | Recent handoff excerpts (default 3) |
+| `get_handoff` | Full body of one handoff file |
 | `write_handoff` | Leave a note for the next agent |
 | `claim_area` / `release_area` | Soft locks |
 

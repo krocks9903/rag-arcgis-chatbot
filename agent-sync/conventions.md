@@ -34,9 +34,11 @@ Shared rules for Nolan, Ethan, Krish, and Cursor agents. Prefer this over invent
 
 ## Coordination (MCP)
 
-1. Session start (non-trivial work): `get_shared_context`, then `list_handoffs`.
+1. Session start (non-trivial work): **`get_session_brief`** once.
 2. Before editing a hot area: `claim_area` (soft lock).
-3. Session end / unfinished work: `write_handoff`, `release_area` if claimed, update priorities via `update_shared_context` when ownership or blockers change.
+3. Session end / unfinished work: `write_handoff`, `release_area` if claimed, `update_shared_context` when priorities or blockers change.
 4. Commit `agent-sync/**` with related work so teammates pull the same state.
+
+Use `get_handoff` / `list_handoffs` for older notes; `get_conventions` only when process rules are unclear.
 
 stdio MCP is per machine — **git is the sync bus** for durable state. Cloud Run serves the same tools at `/mcp` (Bearer auth); runtime writes are ephemeral under `/tmp/agent-sync` until you commit `agent-sync/`.
