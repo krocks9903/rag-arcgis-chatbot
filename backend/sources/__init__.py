@@ -9,8 +9,19 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from config import ENGAGE_ESTERO_DIR, ENABLED_SOURCE_KEYS, LEGACY_ARTICLES_CSV
-from sources.base import ContentRecord, SourceSpec, file_hash, read_records
+from config import (
+    ENABLED_SOURCE_KEYS,
+    ENGAGE_ESTERO_DIR,
+    EXCLUDED_CATEGORY_SLUGS,
+    LEGACY_ARTICLES_CSV,
+)
+from sources.base import (
+    ContentRecord,
+    SourceSpec,
+    file_hash,
+    has_excluded_category,
+    read_records,
+)
 
 if TYPE_CHECKING:  # LangChain is only needed to build documents, not to sync.
     from langchain.schema import Document
@@ -79,7 +90,13 @@ def load_records(spec: SourceSpec, base_dir: str = ENGAGE_ESTERO_DIR) -> list[Co
             record.record_id = record.url or record.title
         if not record.source_type:
             record.source_type = spec.source_type
-    return records
+    # Second line of defense behind the fetch-time filter: a row that was
+    # already committed, or later recategorized upstream, still never loads.
+    kept = [r for r in records if not has_excluded_category(r.category, EXCLUDED_CATEGORY_SLUGS)]
+    dropped = len(records) - len(kept)
+    if dropped:
+        print(f"  {spec.label}: dropped {dropped} row(s) in excluded categories")
+    return kept
 
 
 def source_hashes(base_dir: str = ENGAGE_ESTERO_DIR) -> dict[str, str]:

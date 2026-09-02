@@ -69,6 +69,42 @@ def test_merge_dedupes_legacy_rows_by_url():
     assert len(merged) == 1
 
 
+def test_excluded_category_matching_is_slug_based():
+    from sources.base import has_excluded_category
+
+    excluded = {"limited"}
+    assert has_excluded_category("limited", excluded)
+    assert has_excluded_category("Council News; Limited", excluded)
+    assert has_excluded_category("LIMITED", excluded)
+    # Substring matches must not fire — "unlimited growth" is real coverage.
+    assert not has_excluded_category("Unlimited Growth", excluded)
+    assert not has_excluded_category("Council News", excluded)
+    assert not has_excluded_category("", excluded)
+    # No exclusions configured means nothing is filtered.
+    assert not has_excluded_category("limited", set())
+
+
+def test_excluded_category_rows_never_load(tmp_path, monkeypatch):
+    """Person profiles in 'limited' must not reach the corpus, even if committed."""
+    import sources
+    from sources import SPECS_BY_KEY, load_records
+    from sources.base import write_records
+
+    base = str(tmp_path)
+    write_records(
+        os.path.join(base, "posts.csv"),
+        [
+            _record(record_id="post-1", category="Council News"),
+            _record(record_id="post-2", category="limited", title="Mike Wasson",
+                    url="https://esterotoday.com/mike-wasson/"),
+        ],
+    )
+    monkeypatch.setattr(sources, "EXCLUDED_CATEGORY_SLUGS", {"limited"})
+
+    kept = load_records(SPECS_BY_KEY["posts"], base)
+    assert [r.record_id for r in kept] == ["post-1"]
+
+
 def test_unusable_records_are_rejected():
     assert not _record(title="", content="").is_usable()
     assert not _record(record_id="").is_usable()

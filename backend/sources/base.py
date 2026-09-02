@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import os
+import re
 from dataclasses import dataclass, fields
 from typing import Iterable
 
@@ -99,6 +100,26 @@ def write_records(path: str, records: Iterable[ContentRecord]) -> int:
 
 def normalize_url(url: str) -> str:
     return (url or "").strip().rstrip("/").lower()
+
+
+def slugify(value: str) -> str:
+    """Approximate a WordPress term slug from a display name."""
+    return re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+
+
+def has_excluded_category(category_field: str, excluded_slugs: set[str]) -> bool:
+    """True when any of a record's categories is on the exclusion list.
+
+    Records store display names ("Council News"), while exclusions are
+    configured as slugs, so both sides are slugified before comparing.
+    """
+    if not excluded_slugs:
+        return False
+    for name in (category_field or "").split(";"):
+        slug = slugify(name)
+        if slug and slug in excluded_slugs:
+            return True
+    return False
 
 
 def merge_records(

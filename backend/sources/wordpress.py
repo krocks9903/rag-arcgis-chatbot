@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import requests
 
+from config import EXCLUDED_CATEGORY_SLUGS
 from sources.base import ContentRecord
 
 SITE = "https://esterotoday.com"
@@ -127,10 +128,30 @@ def _term_names(session: requests.Session, taxonomy: str) -> dict[int, str]:
     return names
 
 
+def _category_ids(session: requests.Session, slugs: set[str]) -> list[int]:
+    """Resolve category slugs to ids so the API can filter server-side."""
+    if not slugs:
+        return []
+    ids: list[int] = []
+    try:
+        for term in _collect(
+            session, f"{WP_API}/categories", {"_fields": "id,slug", "slug": ",".join(sorted(slugs))}
+        ):
+            ids.append(int(term["id"]))
+    except requests.RequestException as exc:
+        # Not fatal: load_records filters by category name as a fallback.
+        print(f"  could not resolve excluded categories ({exc})")
+    return ids
+
+
 def fetch_posts(session: requests.Session, limit: int | None = None) -> list[ContentRecord]:
     categories = _term_names(session, "categories")
     records = []
     params = {"_fields": "id,date,link,title,content,excerpt,categories", "status": "publish"}
+    excluded_ids = _category_ids(session, EXCLUDED_CATEGORY_SLUGS)
+    if excluded_ids:
+        params["categories_exclude"] = ",".join(str(i) for i in excluded_ids)
+        print(f"  excluding categories {sorted(EXCLUDED_CATEGORY_SLUGS)} (ids {excluded_ids})")
     for item in _collect(session, f"{WP_API}/posts", params, limit, CONTENT_PER_PAGE):
         cats = [categories.get(int(c), "") for c in (item.get("categories") or [])]
         records.append(

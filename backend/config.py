@@ -29,6 +29,15 @@ ENABLE_SUPPLEMENTAL_SOURCES = os.getenv("ENABLE_SUPPLEMENTAL_SOURCES", "true").l
 ENABLED_SOURCE_KEYS = {
     k.strip() for k in os.getenv("ENABLED_SOURCE_KEYS", "").split(",") if k.strip()
 }
+# WordPress category slugs whose posts must never reach the corpus. "limited"
+# holds person profiles (board members, contributors) that should not surface as
+# answers or results. Enforced when fetching and again when loading, so content
+# added to an excluded category later is dropped without a re-scrape.
+EXCLUDED_CATEGORY_SLUGS = {
+    k.strip().lower()
+    for k in os.getenv("EXCLUDED_CATEGORY_SLUGS", "limited").split(",")
+    if k.strip()
+}
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 # MiniLM cross-encoder is ~5–10× faster on Cloud Run CPU than bge-reranker-base.
