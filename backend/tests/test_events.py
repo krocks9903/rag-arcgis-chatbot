@@ -248,7 +248,7 @@ def test_visitfortmyers_keeps_multi_day_still_running(monkeypatch):
     end = (today.toordinal() + 7)
     end_s = __import__("datetime").date.fromordinal(end).isoformat()
 
-    rss = f"""<?xml version="1.0"?>
+    rss = """<?xml version="1.0"?>
     <rss version="2.0"><channel>
       <item><title>Running Show</title>
         <link>https://www.visitfortmyers.com/event/running-show/9999</link></item>

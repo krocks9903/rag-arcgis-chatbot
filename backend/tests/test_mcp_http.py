@@ -1,11 +1,9 @@
 """Agent-sync MCP helpers + Cloud Run HTTP auth gate."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
