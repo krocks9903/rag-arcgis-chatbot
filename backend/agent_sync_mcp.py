@@ -4,9 +4,11 @@ Git-backed coordination for Nolan / Ethan / Krish Cursor agents.
 On Cloud Run, seed files are baked into the image and copied to a writable
 runtime dir (default /tmp/agent-sync). Commits of agent-sync/ remain the
 durable cross-deploy source of truth.
-"""
-from __future__ import annotations
 
+FastMCP inspects tool parameter annotations with ``issubclass()`` at import
+time, so we must not use ``from __future__ import annotations`` here (PEP 563
+would leave annotations as strings and break registration).
+"""
 import json
 import logging
 import os
