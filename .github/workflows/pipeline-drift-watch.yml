@@ -59,7 +59,7 @@ jobs:
 
       - name: Upload verification report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: drift-verification-${{ github.run_id }}
           path: backend/data/silver/review/location_verification.csv
