@@ -1,20 +1,41 @@
 import { useEffect, useState } from "react";
 import { setMapView, registerMapPanTarget, type MapPanTarget } from "../../lib/mapViewStore";
 
-// Esri "Nearby" Instant App wrapping webmap 84a56d2f741d49f5a70c547923fb45d5
-// (same webmap this panel used to load directly via the JS SDK). Embedding
-// the hosted app itself — not the raw webmap — was a deliberate choice: it
-// picks up the app's own theme/search config, at the cost of native SDK
-// control (no MapView to call .goTo() on for a cross-origin iframe). "Show
-// on map" on a chat card instead drives the iframe's own center/level URL
-// parameters (Esri's documented Instant Apps deep-link params — see
-// mapViewStore.ts's panToCoords) so panning still works without one.
-const INSTANT_APP_ID = "90d68fdd2de841b295cc1c3cfd6df524";
-const INSTANT_APP_BASE_URL = `https://eccl-swfl-safety.maps.arcgis.com/apps/instant/nearby/index.html?appid=${INSTANT_APP_ID}`;
+// Esri's dedicated Embed map viewer, wrapping the same underlying webmap
+// (84a56d2f741d49f5a70c547923fb45d5) this panel used to load directly via
+// the JS SDK. This used to be the "Nearby" Instant App instead (picks up the
+// app's own theme/search config) — switched away from it after finding two
+// real problems in production: (1) it's built assuming same-origin or
+// top-level embedding, and Safari/WebKit — unlike Chromium — actually
+// enforces that: the app's own JS throws "Blocked a frame with origin ...
+// from accessing a frame with origin ..." trying to touch window.parent/top
+// cross-origin, and the WebGL map canvas silently never renders (UI chrome
+// around it still does, which makes it look like a rendering bug rather
+// than a permissions error). (2) Instant Apps show a first-visit onboarding
+// panel over the whole map with no way to disable it from our side (that
+// setting lives in the app's own ArcGIS Online config) — easy to mistake
+// for the map being broken. The Embed viewer is Esri's purpose-built
+// solution for arbitrary third-party iframe embedding: no onboarding
+// overlay, and it renders correctly in WebKit. Same center/level deep-link
+// URL param convention as Instant Apps, so "Show on map" (see
+// mapViewStore.ts's panToCoords) needed no changes.
+const WEBMAP_ID = "84a56d2f741d49f5a70c547923fb45d5";
+const EMBED_BASE_URL = `https://www.arcgis.com/apps/Embed/index.html?webmap=${WEBMAP_ID}&zoom=true&scale=true&search=true`;
+
+// The board-records feature layer has a hard server-side minScale (1:108,468,
+// set on the hosted FeatureServer itself — see
+// services2.arcgis.com/.../FeatureServer/0?f=json) beyond which it stops
+// rendering entirely, in every app that embeds it, not just this one. The
+// webmap's own saved default extent is much more zoomed in than that (~1.2mi
+// wide — level ~15), so leaving center/level unset showed only a handful of
+// records near its one saved spot. This default instead sits right at the
+// edge of what minScale allows, showing the widest area the layer will
+// actually render across.
+const DEFAULT_CENTER: MapPanTarget = { lat: 26.435, lng: -81.8, zoom: 13 };
 
 function buildMapUrl(target: MapPanTarget | null): string {
-  if (!target) return INSTANT_APP_BASE_URL;
-  return `${INSTANT_APP_BASE_URL}&center=${target.lng},${target.lat}&level=${target.zoom}`;
+  const t = target ?? DEFAULT_CENTER;
+  return `${EMBED_BASE_URL}&center=${t.lng},${t.lat}&level=${t.zoom}`;
 }
 
 // The app's underlying feature layer is public on its own, so the record
@@ -103,6 +124,13 @@ export default function MapPanel({ expanded, onToggleExpand, onRecordCount }: Ma
         id="viewDiv"
         title="Estero Board Records map"
         src={mapUrl}
+        // Safari/WebKit enforces iframe permissions policy far more strictly
+        // than Chromium: with no `allow` attribute at all, the Esri app's own
+        // UI chrome (search bar, zoom controls) still rendered, but the WebGL
+        // map canvas itself silently stayed blank — Chromium degrades this
+        // gracefully (a console warning), WebKit just doesn't render.
+        // geolocation covers the app's "Use current location" search option.
+        allow="fullscreen; geolocation"
         // Cross-origin iframe: this can catch a hard network/navigation
         // failure, but not an error the Esri app renders inside its own
         // page — that's invisible to us. The "Open directly" link above is

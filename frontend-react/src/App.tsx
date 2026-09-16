@@ -8,6 +8,7 @@ import "./App.css";
 
 export default function App() {
   const { messages, send, newChat } = useChat();
+
   const [recordCount, setRecordCount] = useState<number | null | undefined>(undefined);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [mobileMapVisible, setMobileMapVisible] = useState(false);
