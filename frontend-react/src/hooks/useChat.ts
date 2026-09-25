@@ -6,6 +6,8 @@ import {
   extractJsonCards,
   liveProse,
   normalizeProject,
+  normalizeRelated,
+  normalizeTimeline,
   parseBotText,
   parseStructuredResponse,
 } from "../lib/parseAnswer";
@@ -125,6 +127,11 @@ async function tryStreamChat(question: string, botId: string, setMessages: Sette
     streaming: false,
     route: donePayload?.route,
     feedbackMeta: donePayload?.meta,
+    timeline: normalizeTimeline(donePayload?.timeline),
+    related: normalizeRelated(donePayload?.related),
+    usedRecordIds: (donePayload?.used_record_ids || []).filter((id): id is string => !!id),
+    followUps: (donePayload?.follow_ups || []).filter((q): q is string => !!q),
+    sourceType: donePayload?.source_type || (cards.length > 0 ? "records" : "general"),
   });
   focusMapOnCards(cards);
   return true;
@@ -151,7 +158,8 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
     const data: ChatApiResponse = await res.json();
 
     if (data.projects || data.articles || data.summary) {
-      const { prose, cards } = parseStructuredResponse(data);
+      const { prose, cards, timeline, related, usedRecordIds, followUps, sourceType } =
+        parseStructuredResponse(data);
       patchMessage(setMessages, botId, {
         prose,
         cards,
@@ -159,6 +167,11 @@ async function plainChat(question: string, botId: string, setMessages: Setter): 
         streaming: false,
         route: data.route,
         feedbackMeta: data.meta,
+        timeline,
+        related,
+        usedRecordIds,
+        followUps,
+        sourceType,
       });
       focusMapOnCards(cards);
       return;
