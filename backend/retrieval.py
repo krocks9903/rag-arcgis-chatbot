@@ -2,17 +2,24 @@
 from __future__ import annotations
 
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
+from torch import nn
 
 from config import (
     DENSE_K,
+    ENABLE_ONNX_RERANKER,
     ENABLE_PROJECT_SCOPE,
     ENABLE_RECENCY_BOOST,
     ENABLE_RERANKER,
+    MIN_RERANK_ABS,
+    MIN_RERANK_RELATIVE,
+    MIN_RERANK_SCORE,
     PROJECT_SCOPE_CAP,
     PROJECT_SCOPE_MIN_SUPPORT,
     RECENCY_BOOST,
@@ -22,12 +29,23 @@ from config import (
     RERANK_CANDIDATES,
     RERANKER_MODEL,
     RERANK_K,
-    SCORE_THRESHOLD,
     SPARSE_K,
 )
+from onnx_reranker import OnnxCrossEncoder, load_onnx_reranker
+from schema_aliases import row_value
 from store import DataStore, _tokenize
 
-_reranker: CrossEncoder | None = None
+_reranker: CrossEncoder | OnnxCrossEncoder | None = None
+_reranker_lock = threading.Lock()
+
+# Phrasings of one question (topic_queries + the LLM rewrite) are retrieved
+# concurrently: a single cross-encoder call doesn't saturate the CPU, so two
+# overlapping calls finish ~30% sooner than back-to-back ones, with identical
+# scores. Shared across requests; torch releases the GIL while scoring.
+RETRIEVAL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="retrieve")
+# Small reranker batches pad each batch only to its own longest pair instead
+# of the longest of all ~20 candidates — ~15% faster, same scores.
+_RERANK_BATCH_SIZE = 4
 # Cap rerank input length — tokenizer max is ~512 tokens anyway; long article
 # chunks otherwise dominate CPU time (same rationale as backend/reranker.py).
 _MAX_CHARS_PER_DOC = 1200
@@ -154,12 +172,40 @@ def topic_queries(question: str) -> list[str]:
     return seen
 
 
-def get_reranker() -> CrossEncoder:
-    global _reranker
+def get_reranker() -> CrossEncoder | OnnxCrossEncoder:
     if _reranker is None:
-        print(f"Loading reranker {RERANKER_MODEL}…")
-        _reranker = CrossEncoder(RERANKER_MODEL)
+        # The startup warm-up and the first requests (plus their concurrent
+        # phrasings) can all arrive here at once — load exactly one copy.
+        with _reranker_lock:
+            if _reranker is None:
+                _load_reranker()
     return _reranker
+
+
+def _load_reranker() -> None:
+    global _reranker
+    print(f"Loading reranker {RERANKER_MODEL}…")
+    if ENABLE_ONNX_RERANKER:
+        # Same model and scores on ONNX Runtime (sigmoid applied there too) —
+        # see onnx_reranker. None means fall back to PyTorch below.
+        onnx_model = load_onnx_reranker()
+        if onnx_model is not None:
+            print("Reranker backend: onnxruntime")
+            _reranker = onnx_model
+            return
+    # Always score on a 0-1 sigmoid scale: MIN_RERANK_SCORE, the recency
+    # boost and CRAG grading all assume it. bge-reranker-base already
+    # does, but ms-marco-MiniLM ships an Identity activation and would
+    # return raw logits (~-10..+10), which silently swamps the recency term.
+    # SDPA is PyTorch's fused attention kernel: same math as the eager
+    # implementation (score drift < 1e-6, identical rankings on the eval
+    # set), just faster on CPU.
+    _reranker = CrossEncoder(
+        RERANKER_MODEL,
+        default_activation_function=nn.Sigmoid(),
+        automodel_args={"attn_implementation": "sdpa"},
+    )
+    print("Reranker backend: pytorch")
 
 
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> list[tuple[str, float]]:
@@ -440,7 +486,7 @@ def _reserve_recent(
 ) -> list[tuple[Document, float]]:
     """Union the n most-recently-dated items from the full reranked list into
     pool (split per source-type bucket — see _recent_topup), bypassing
-    SCORE_THRESHOLD for just those.
+    MIN_RERANK_SCORE for just those.
 
     Without this, a genuinely-recent-but-only-tangentially-on-topic candidate
     (reserved by _recent_topup specifically for its date) can score too low
@@ -580,6 +626,20 @@ def _development_approval_docs(
     return [meta_by_row[i] for i in wanted if i in meta_by_row]
 
 
+def rerank_floor(best: float) -> float:
+    """Minimum rerank score a candidate needs to reach the answer model.
+
+    MIN_RERANK_SCORE when the best candidate clears it (bge-reranker-base
+    scores a clear match ~0.98). Otherwise a fraction of the best score, never
+    below MIN_RERANK_ABS: ms-marco-MiniLM scores long resident questions very
+    low even for the right document (0.004 vs ~0.0000 for noise), and a fixed
+    0.25 floor would leave those questions with no records at all.
+    """
+    if best >= MIN_RERANK_SCORE:
+        return MIN_RERANK_SCORE
+    return max(MIN_RERANK_ABS, best * MIN_RERANK_RELATIVE)
+
+
 def hybrid_retrieve(
     store: DataStore,
     query: str,
@@ -656,27 +716,38 @@ def hybrid_retrieve(
             ranked = [(d, s) for d, s in ranked if not _is_board_doc(d) or id(d) in dev_ids]
             ranked += [(d, 1.0) for d in dev_docs if id(d) not in {id(r[0]) for r in ranked}]
         if query_wants_recent(intent) and not dev_docs:
-            ranked = _reserve_recent(ranked, ranked, _RECENCY_TOPUP, query=query)
+            ranked = _reserve_recent(ranked, ranked, _RECENCY_TOPUP, query=intent)
         boosted = apply_recency_boost(ranked, query, intent_query=intent)
         return _finalize(boosted, intent)
 
     reranker = get_reranker()
     pairs = [(query, (d.page_content or "")[:_MAX_CHARS_PER_DOC]) for d in candidates]
-    scores = reranker.predict(pairs)
+    scores = reranker.predict(pairs, batch_size=_RERANK_BATCH_SIZE, show_progress_bar=False)
     # Always coerce to Python float — numpy.float32 is not JSON-serializable.
     ranked = [(d, float(s)) for d, s in sorted(zip(candidates, scores), key=lambda x: -float(x[1]))]
-    filtered = [(d, s) for d, s in ranked if s >= SCORE_THRESHOLD]
-    pool = filtered or ranked
+    floor = rerank_floor(ranked[0][1] if ranked else 0.0)
+    filtered = [(d, s) for d, s in ranked if s >= floor]
+    # Hard floor — deliberately NOT "filtered or ranked". Falling back to the
+    # unfiltered list when nothing clears the bar is exactly how an unrelated
+    # doc (e.g. a rail-trail article for a "wawa" question) used to slip back
+    # in: _reserve_by_bucket below guarantees a couple of results per
+    # source-type bucket, and if `pool` still contained 0.0-scored docs, that
+    # guarantee would happily promote one of them just to fill the quota.
+    # The floor is relative to the best candidate (see rerank_floor), so a
+    # long question MiniLM scores low overall keeps its best matches.
+    pool = filtered
     if dev_docs:
-        # Curated approvals bypass SCORE_THRESHOLD; unrelated board rows (agenda
+        # Curated approvals bypass the floor; unrelated board rows (agenda
         # approval, personnel policy…) that only matched "approved" are dropped.
-        floor = max(SCORE_THRESHOLD, 0.0)
         curated = [(d, max(s, floor)) for d, s in ranked if id(d) in dev_ids]
         pool = curated + [(d, s) for d, s in filtered if not _is_board_doc(d)]
     if query_wants_recent(intent) and not dev_docs:
-        # Bypass SCORE_THRESHOLD for the objectively most-recent candidates —
-        # see _reserve_recent.
-        pool = _reserve_recent(ranked, pool, _RECENCY_TOPUP, query=query)
+        # Recency intent is the one other exception: bypass the floor for the
+        # most-recent on-topic candidates — see _reserve_recent. The topic check
+        # reads the citizen's question, not `query`: an LLM-expanded search
+        # query adds broad words ("construction", "status") that would let
+        # corpus-wide newest docs through.
+        pool = _reserve_recent(ranked, pool, _RECENCY_TOPUP, query=intent)
     boosted = apply_recency_boost(pool, query, intent_query=intent)
     return _finalize(boosted, intent)
 
@@ -690,14 +761,28 @@ def hybrid_retrieve_multi(
     """hybrid_retrieve over several query phrasings, merged by best score per chunk."""
     if len(queries) == 1:
         return hybrid_retrieve(store, queries[0], intent_query=intent_query)
+    futures = [
+        RETRIEVAL_POOL.submit(hybrid_retrieve, store, q, intent_query=intent_query) for q in queries
+    ]
+    return merge_phrasing_hits(
+        [f.result() for f in futures], intent_query if intent_query is not None else queries[0]
+    )
+
+
+def merge_phrasing_hits(
+    per_query: list[list[tuple[Document, float]]], intent: str
+) -> list[tuple[Document, float]]:
+    """Merge several phrasings' hybrid_retrieve results by best score per chunk."""
+    if len(per_query) == 1:
+        return per_query[0]
     best: dict[str, tuple[Document, float]] = {}
-    for q in queries:
-        for doc, score in hybrid_retrieve(store, q, intent_query=intent_query):
+    for hits in per_query:
+        for doc, score in hits:
             key = doc.metadata.get("chunk_id") or str(id(doc))
             if key not in best or score > best[key][1]:
                 best[key] = (doc, score)
     merged = sorted(best.values(), key=lambda t: -t[1])
-    return _finalize(merged, intent_query if intent_query is not None else queries[0])
+    return _finalize(merged, intent)
 
 
 def _project_id(doc: Document) -> str:
@@ -762,6 +847,177 @@ def scope_hits_to_project(
     # items); unlinked keyword hits demoted after and dropped if the cap fills.
     kept.sort(key=lambda t: (0 if _project_id(t[0]) == pid else 1, -t[1]))
     return kept[:PROJECT_SCOPE_CAP]
+
+
+def _record_type(source_type: str) -> str:
+    """Collapse the finer source_type vocabulary (website_article /
+    website_page / event / document) into the label the answer model sees."""
+    if not source_type:
+        return "board record"
+    if source_type == "website_article":
+        return "article"
+    if source_type == "event":
+        return "event"
+    return "document"
+
+
+def record_citation_id(doc: Document, row: dict[str, Any] | None = None) -> str:
+    """The one ID a retrieved record is known by — in the LLM context, in its
+    used_record_ids/timeline/related citations, and as the dedupe key the
+    answer's cards are filtered on (rag_path.build_cards). Keeping all three on
+    this single helper is what makes "cite [X]" line up with "card X".
+
+    Supplemental sources: record_id (e.g. "post-1234"), else URL. Board rows:
+    ApplicationID, else "row-<row_index>" (most Village Council agenda items
+    have no ApplicationID).
+    """
+    md = doc.metadata
+    if md.get("source_type"):
+        return str(md.get("record_id") or md.get("url") or md.get("document_url") or "").strip()
+    app_id = row_value(row, "application_id").strip() if row else ""
+    app_id = app_id or str(md.get("application_id") or "").strip()
+    return app_id or f"row-{md.get('row_index')}"
+
+
+def is_internal_record_id(record_id: str) -> bool:
+    """IDs that mean nothing to a resident and are never shown: synthetic
+    row-N keys, and the full URLs legacy EsteroToday articles are keyed by
+    (sources/__init__.py backfill). Their cards still render and link out."""
+    rid = str(record_id or "")
+    return rid.startswith("row-") or rid.startswith(("http://", "https://"))
+
+
+_CONTEXT_HEADER_LINE_RE = re.compile(
+    r"^(?:DATE|SOURCE_TYPE|TITLE|SEARCH|TRUE_URL|venue|location|category):", re.IGNORECASE
+)
+# Per-record excerpt budget for the answer model. Articles carry the detail
+# (lane counts, dollar amounts, schedules) the answer needs, so they get more
+# room than a board row's summary field.
+_EXCERPT_CHARS_BOARD = 900
+_EXCERPT_CHARS_SUPPLEMENTAL = 1600
+
+
+def _clean_chunk_text(text: str) -> str:
+    lines = [ln for ln in (text or "").splitlines() if not _CONTEXT_HEADER_LINE_RE.match(ln.strip())]
+    return " ".join(" ".join(lines).split())
+
+
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return (cut[: end + 1] if end > limit * 0.6 else cut.rstrip()) + " …"
+
+
+def merge_records_for_llm(store: DataStore, hits: list[tuple[Document, float]]) -> list[dict[str, Any]]:
+    """Merge hit chunks belonging to the same record into one entry, so a
+    record isn't sent to the answer model twice (e.g. its 'meta' chunk and
+    its 'summary' chunk both surviving rerank). IDs come from
+    record_citation_id, the same key build_cards filters on.
+
+    Each entry carries the text the answer is grounded in — a board row's
+    Summary, or the retrieved chunk text of an article/page/event (several
+    chunks of one article are joined in rank order). Title/date alone are not
+    enough to answer from. Keeps the best rerank score across a record's
+    chunks, for eval logging.
+    """
+    board_by_id: dict[str, dict[str, Any]] = {}
+    supplemental_by_id: dict[str, dict[str, Any]] = {}
+
+    for doc, score in hits:
+        md = doc.metadata
+        source_type = md.get("source_type")
+        if source_type:
+            rid = record_citation_id(doc)
+            if not rid:
+                continue
+            text = _clean_chunk_text(doc.page_content)
+            entry = supplemental_by_id.get(rid)
+            if entry is not None:
+                entry["score"] = max(entry["score"], float(score))
+                if text and text not in entry["_chunks"]:
+                    entry["_chunks"].append(text)
+                continue
+            supplemental_by_id[rid] = {
+                "id": rid,
+                "type": _record_type(source_type),
+                "title": str(md.get("title") or "").strip(),
+                "date": str(md.get("publish_date") or md.get("date") or "").strip(),
+                "location": str(md.get("location") or md.get("venue") or "").strip(),
+                "score": float(score),
+                "_chunks": [text] if text else [],
+            }
+            continue
+
+        row_index = md.get("row_index")
+        if row_index is None:
+            continue
+        try:
+            row = store.dataframe.iloc[int(row_index)].to_dict()
+        except (IndexError, ValueError, TypeError):
+            continue
+        rid = record_citation_id(doc, row)
+        this_date = row_value(row, "meeting_date")
+        existing = board_by_id.get(rid)
+        best = max(float(score), existing["score"]) if existing else float(score)
+        # Same dedupe rule as build_cards: keep the most-recently-dated meeting
+        # row for this record.
+        if existing is not None and (existing["date"] or "") >= this_date:
+            existing["score"] = best
+            continue
+        board_by_id[rid] = {
+            "id": rid,
+            "type": "board record",
+            "title": row_value(row, "project_name"),
+            "date": this_date,
+            "board": row_value(row, "board"),
+            "location": row_value(row, "location"),
+            "action": row_value(row, "action_taken"),
+            "outcome": row_value(row, "outcome"),
+            "status": row_value(row, "status"),
+            "text": _clip(" ".join(row_value(row, "summary").split()), _EXCERPT_CHARS_BOARD),
+            "score": best,
+        }
+
+    for entry in supplemental_by_id.values():
+        entry["text"] = _clip(" … ".join(entry.pop("_chunks")), _EXCERPT_CHARS_SUPPLEMENTAL)
+    return list(board_by_id.values()) + list(supplemental_by_id.values())
+
+
+def format_records_for_llm(records: list[dict[str, Any]]) -> str:
+    """One block per record, newest first (so "latest" questions read the
+    current state before older history):
+
+        [ID] type | title | date
+        Board: … | Location: … | Action: … | Outcome: …
+        <summary / article excerpt>
+    """
+    if not records:
+        return "No relevant records found in the dataset."
+
+    ordered = sorted(records, key=lambda r: r.get("date") or "", reverse=True)
+    blocks = []
+    for r in ordered:
+        head = " | ".join(x for x in (r.get("type", ""), r.get("title", ""), r.get("date") or "undated") if x)
+        facts = " | ".join(
+            f"{label}: {r[key]}"
+            for key, label in (
+                ("board", "Board"),
+                ("location", "Location"),
+                ("action", "Action"),
+                ("outcome", "Outcome"),
+                ("status", "Status"),
+            )
+            if r.get(key) and not (key == "outcome" and r.get(key) == r.get("action"))
+        )
+        lines = [f"[{r.get('id', '')}] {head}"]
+        if facts:
+            lines.append(facts)
+        if r.get("text"):
+            lines.append(r["text"])
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def format_docs(hits: list[tuple[Document, float]]) -> str:
