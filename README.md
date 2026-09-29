@@ -184,11 +184,11 @@ duplicated). Adding a source means one `SourceSpec` plus one fetch function — 
 - **pipeline-ci.yml** — pipeline pytest + deliverables up-to-date guard
 - **pipeline-refresh.yml** — weekly data refresh from source PDFs
 - **sync-engage-estero.yml** — weekly sync of site posts/pages/events/documents
-- **deploy.yml** — Cloud Run deploy when `ENABLE_DEPLOY=true`
+- **deploy-vps.yml** — rebuilds the VPS when app code changes, on the `engage-estero` runner
 
 ## Production
 
-Cloud Run serves the vanilla frontend and API from one container (`SERVE_FRONTEND=true`). Set `ENABLE_DEPLOY=true` and GCP secrets/vars per [docs/DEPLOY_DOCKER.md](docs/DEPLOY_DOCKER.md).
+The public site is https://tracker.esterotoday.com/, served from the VPS in `deploy/vps/`. GitHub Actions updates it through `deploy-vps.yml`.
 
 ## Notes
 

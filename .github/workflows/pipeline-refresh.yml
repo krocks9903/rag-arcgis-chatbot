@@ -129,8 +129,8 @@ jobs:
             echo "No deliverable changes to commit."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            # [skip ci] avoids a flaky pipeline-ci rebuild loop; deploy is
-            # triggered explicitly below so Cloud Run still gets the new CSV.
+            # [skip ci] avoids a flaky pipeline-ci rebuild loop; the VPS
+            # deploy is triggered explicitly below so the new CSV still ships.
             git commit -m "chore(data): refresh data deliverables [skip ci]"
             # The branch may have moved while the build ran; replay on top.
             git pull --rebase origin "${{ github.ref_name }}"
@@ -147,10 +147,10 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
-      - name: Redeploy Cloud Run with refreshed CSV
+      - name: Redeploy the VPS with the refreshed CSV
         if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run deploy.yml --ref "${{ github.ref_name }}"
-          echo "Triggered Deploy to Cloud Run so the frontend picks up the new gold CSV."
+          gh workflow run deploy-vps.yml --ref "${{ github.ref_name }}"
+          echo "Triggered the VPS deploy so the site picks up the new gold CSV."
