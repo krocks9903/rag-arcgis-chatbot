@@ -2,7 +2,9 @@
 # Pull main, rebuild, and restart the VPS deployment.
 set -eu
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+# Follow the /usr/local/bin/update-engage-estero symlink back to deploy/vps.
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$SCRIPT_PATH")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
 
 if [ "$(id -u)" -ne 0 ]; then
