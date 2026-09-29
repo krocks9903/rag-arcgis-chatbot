@@ -1,6 +1,6 @@
 # One container: FastAPI + React UI (same image Cloud Run uses).
 # From this directory: ./up.sh
-# Site: http://<server-ip>:8080/  (8080 avoids Plesk/cPanel on port 80)
+# Plesk proxies the public site to 127.0.0.1:8080. Do not publish 8080 on the internet.
 
 services:
   app:
@@ -9,7 +9,7 @@ services:
       dockerfile: backend/Dockerfile
     image: rag-arcgis-chatbot:vps
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     env_file:
       - .env
     environment:

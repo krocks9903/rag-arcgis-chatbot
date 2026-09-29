@@ -1,0 +1,28 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend-react/**"
+      - "agent-sync/**"
+      - "deploy/vps/**"
+      - ".github/workflows/deploy-vps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Update Engage Estero on the VPS
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, engage-estero]
+    steps:
+      - name: Rebuild and restart
+        run: update-engage-estero
